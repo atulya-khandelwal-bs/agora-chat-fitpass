@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+option go_package = "protos/fitfeast_communication";
+
+package fitfeast_communication;
+
+option php_namespace = "FitfeastCommunication";
+option php_metadata_namespace = "GPBMetadata\\FitfeastCommunication";
+
+service FitfeastCommunicationService {
+  rpc DietAssignNotification (CustomerDietAssignNotificationRequest) returns (Response);
+}
+
+message CustomerDietAssignNotificationRequest {
+  int64 user_id = 1;
+  string template_type = 2;
+  string last_date_of_diet = 3;
+  string diet_token_id = 4;
+  bool is_new_fitfeast_dashboard = 5;
+}
+
+message Response {
+  string message = 1;
+}

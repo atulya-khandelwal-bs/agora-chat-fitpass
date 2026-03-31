@@ -1,0 +1,67 @@
+// ========================================
+// BUTTON COMPONENT STYLES
+// ========================================
+
+// Let Bootstrap handle button styles - only add custom overrides if needed
+// Bootstrap already provides excellent button styles with proper hover states
+
+// Custom button states for loading
+.btn.loading {
+    opacity: 0.25;
+    cursor: not-allowed;
+}
+
+// Fix disabled button opacity - make them less transparent
+.btn:disabled,
+.btn[disabled] {
+    opacity: 0.75 !important; // Less transparent than Bootstrap's default 0.65
+    cursor: not-allowed;
+}
+
+// Form button styles
+.form-actions .btn {
+    min-width: 100px;
+}
+
+// Responsive button styles
+@media (max-width: 768px) {
+    .form-actions .btn {
+        width: 100%;
+        min-width: auto;
+    }
+}
+
+// Darker danger button variant
+.btn-danger-dark {
+    color: #fff;
+    background-color: #DC4144;
+    border-color: #DC4144;
+}
+
+.btn-danger-dark:hover {
+    color: #fff;
+    background-color: #8b1a24;
+    border-color: #7a161f;
+}
+
+.btn-danger-dark:focus {
+    color: #fff;
+    background-color: #8b1a24;
+    border-color: #7a161f;
+    box-shadow: 0 0 0 0.25rem rgba(167, 30, 42, 0.5);
+}
+
+.btn-danger-dark:active,
+.btn-danger-dark.active {
+    color: #fff;
+    background-color: #7a161f;
+    border-color: #6d141c;
+}
+
+.btn-danger-dark:disabled,
+.btn-danger-dark.disabled {
+    color: #fff;
+    background-color: #a71e2a;
+    border-color: #a71e2a;
+    opacity: 0.65;
+}
