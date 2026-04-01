@@ -4,10 +4,10 @@
  */
 
 import config from "../../common/config.ts";
-import { Contact, LogEntry } from "../../common/types/chat";
-import type { MessageBody } from "agora-chat";
+import { Contact, LogEntry, type MessageBody } from "../../common/types/chat";
 import React from "react";
 import { isBlockedUID } from "./blockedUIDs";
+import { findContactForMessageConversation } from "./conversationListMatch";
 
 interface IncomingCall {
   from: string;
@@ -371,42 +371,27 @@ export function createMessageHandlers({
         const isSelfSentCustom =
           fromId === userId || String(fromId) === String(userId);
         if (msg.from) {
-          // Determine which conversation to update
-          const conversationIdToUpdate = isSelfSentCustom
-            ? msg.to || msg.from // If self-sent, use recipient; fallback to sender
-            : msg.from; // If incoming, use sender
-
-          if (!conversationIdToUpdate) {
-            return; // Can't update without a conversation ID
-          }
-
-          // Normalize: try both with and without user_ prefix
-          const normalizedId = conversationIdToUpdate.startsWith("user_")
-            ? conversationIdToUpdate
-            : `user_${conversationIdToUpdate}`;
-          const normalizedIdWithoutPrefix = conversationIdToUpdate.startsWith(
-            "user_"
-          )
-            ? conversationIdToUpdate.replace("user_", "")
-            : conversationIdToUpdate;
+          const fromSender = String(msg.from);
+          const normalizedId = fromSender.startsWith("user_")
+            ? fromSender
+            : `user_${fromSender}`;
+          const normalizedIdWithoutPrefix = fromSender.startsWith("user_")
+            ? fromSender.replace("user_", "")
+            : fromSender;
 
           console.log("🔄 [onTextMessage] Updating conversation preview:", {
             fromId,
-            conversationIdToUpdate,
-            normalizedId,
-            normalizedIdWithoutPrefix,
+            chatType: msg.chatType,
+            to: msg.to,
             preview,
             isSelfSent: isSelfSentCustom,
           });
 
           setConversations((prev) => {
-            // Find conversation by matching either format
-            const existing = prev.find(
-              (c) =>
-                c.id === conversationIdToUpdate ||
-                c.id === normalizedId ||
-                c.id === normalizedIdWithoutPrefix ||
-                c.id === `user_${normalizedIdWithoutPrefix}`
+            const existing = findContactForMessageConversation(
+              prev,
+              msg,
+              isSelfSentCustom
             );
 
 
@@ -664,37 +649,21 @@ export function createMessageHandlers({
           (msg as { id?: string; mid?: string }).mid,
       });
 
-      // Update conversation when receiving a message - normalize conversation ID matching
-      // For self-sent messages, update conversation for the recipient (msg.to)
-      // For incoming messages, update conversation for the sender (msg.from)
+      // Update conversation list row (patient id); group self-sent uses ext.targetUserId / groupId on Contact
       if (msg.from) {
-        // Determine which conversation to update
-        const conversationIdToUpdate = isSelfSentText
-          ? msg.to || msg.from // If self-sent, use recipient; fallback to sender
-          : msg.from; // If incoming, use sender
-
-        if (!conversationIdToUpdate) {
-          return; // Can't update without a conversation ID
-        }
-
-        // Normalize: try both with and without user_ prefix
-        const normalizedId = conversationIdToUpdate.startsWith("user_")
-          ? conversationIdToUpdate
-          : `user_${conversationIdToUpdate}`;
-        const normalizedIdWithoutPrefix = conversationIdToUpdate.startsWith(
-          "user_"
-        )
-          ? conversationIdToUpdate.replace("user_", "")
-          : conversationIdToUpdate;
+        const fromSender = String(msg.from);
+        const normalizedId = fromSender.startsWith("user_")
+          ? fromSender
+          : `user_${fromSender}`;
+        const normalizedIdWithoutPrefix = fromSender.startsWith("user_")
+          ? fromSender.replace("user_", "")
+          : fromSender;
 
         setConversations((prev) => {
-          // Find conversation by matching either format
-          const existing = prev.find(
-            (c) =>
-              c.id === conversationIdToUpdate ||
-              c.id === normalizedId ||
-              c.id === normalizedIdWithoutPrefix ||
-              c.id === `user_${normalizedIdWithoutPrefix}`
+          const existing = findContactForMessageConversation(
+            prev,
+            msg,
+            isSelfSentText
           );
 
           if (existing) {
@@ -757,6 +726,7 @@ export function createMessageHandlers({
       console.log("📨 [onCustomMessage] Received custom message:", {
         from: msg.from,
         to: msg.to,
+        chatType: msg.chatType,
         type: msg.type,
         timestamp: new Date().toISOString(),
         hasBody: !!msg.body,
@@ -1226,37 +1196,20 @@ export function createMessageHandlers({
           (msg as { id?: string; mid?: string }).mid,
       });
 
-      // Update conversation when receiving a custom message - normalize conversation ID matching
-      // For self-sent messages, update conversation for the recipient (msg.to)
-      // For incoming messages, update conversation for the sender (msg.from)
       if (msg.from) {
-        // Determine which conversation to update
-        const conversationIdToUpdate = isSelfSent
-          ? msg.to || msg.from // If self-sent, use recipient; fallback to sender
-          : msg.from; // If incoming, use sender
-
-        if (!conversationIdToUpdate) {
-          return; // Can't update without a conversation ID
-        }
-
-        // Normalize: try both with and without user_ prefix
-        const normalizedId = conversationIdToUpdate.startsWith("user_")
-          ? conversationIdToUpdate
-          : `user_${conversationIdToUpdate}`;
-        const normalizedIdWithoutPrefix = conversationIdToUpdate.startsWith(
-          "user_"
-        )
-          ? conversationIdToUpdate.replace("user_", "")
-          : conversationIdToUpdate;
+        const fromSender = String(msg.from);
+        const normalizedId = fromSender.startsWith("user_")
+          ? fromSender
+          : `user_${fromSender}`;
+        const normalizedIdWithoutPrefix = fromSender.startsWith("user_")
+          ? fromSender.replace("user_", "")
+          : fromSender;
 
         setConversations((prev) => {
-          // Find conversation by matching either format
-          const existing = prev.find(
-            (c) =>
-              c.id === conversationIdToUpdate ||
-              c.id === normalizedId ||
-              c.id === normalizedIdWithoutPrefix ||
-              c.id === `user_${normalizedIdWithoutPrefix}`
+          const existing = findContactForMessageConversation(
+            prev,
+            msg,
+            isSelfSent
           );
 
           if (existing) {
@@ -1370,15 +1323,10 @@ export function createMessageHandlers({
       const errorMessage = e?.message || String(e);
       const errorLower = errorMessage.toLowerCase();
       
-      // Handle "user not found" - retry registration and login
+      // Handle "user not found" - refresh token via dietitian flow (no register-user API)
       if (errorLower.includes("user not found") || errorLower.includes("sorry, user not found")) {
-        addLog("User not registered. Registering and retrying...");
-        fetch(config.api.registerUserEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: userId }),
-        })
-          .then(() => generateNewToken())
+        addLog("User not found in chat — refreshing session token...");
+        generateNewToken()
           .then((newToken) => {
             if (newToken) {
               const client = getClientRef() as { open?: (options: { user: string; accessToken: string }) => Promise<void> };

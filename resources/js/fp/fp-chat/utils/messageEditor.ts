@@ -18,7 +18,7 @@ export interface EditMessageOptions {
     isFromUser?: boolean;
     [key: string]: unknown;
   };
-  /** Optional peer ID (recipient) */
+  /** Group id for Agora group chat */
   peerId?: string;
 }
 
@@ -40,7 +40,7 @@ export interface EditMessageOptions {
  *     senderProfile: "https://...",
  *     isFromUser: false
  *   },
- *   peerId: "119933"
+ *   peerId: "309921394524161" // Agora group id
  * });
  * console.log(response.message);
  * ```
@@ -70,7 +70,7 @@ export async function editMessage(
     ext?: typeof ext;
     to?: string;
   } = {
-    chatType: "singleChat",
+    chatType: "groupChat",
     type: "txt",
     msg: newText,
   };

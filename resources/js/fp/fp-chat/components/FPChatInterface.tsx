@@ -94,6 +94,8 @@ interface FPChatInterfaceProps {
   onUpdateLastMessageFromHistory?: (peerId: string, message: Message) => void;
   coachInfo?: CoachInfo;
   onSendProducts?: (() => void) | null;
+  /** When false, initial history fetch waits (e.g. until Agora login completes) */
+  historyFetchEnabled?: boolean;
 }
 
 export default function FPChatInterface({
@@ -112,6 +114,7 @@ export default function FPChatInterface({
   onUpdateLastMessageFromHistory,
   coachInfo = { coachName: "", profilePhoto: "" },
   onSendProducts,
+  historyFetchEnabled = true,
 }: FPChatInterfaceProps): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<"Chat" | "Info" | "Description">(
     "Chat"
@@ -378,19 +381,34 @@ export default function FPChatInterface({
     const idsMatch = (a: string, b: string) =>
       normalizeId(a) === normalizeId(b) || a === b;
 
+    /** FPChatApp logs group sends as `You → group <groupId>:` — strip the label for comparison to peerId */
+    const parseOutgoingLogTargetId = (raw: string): string => {
+      const t = raw.trim();
+      if (t.toLowerCase().startsWith("group ")) {
+        return t.slice(6).trim();
+      }
+      return t;
+    };
+
     const filteredLogs = logEntries.filter((entry) => {
       const { log } = entry;
       if (!log) return false;
       // Filter messages for the current conversation
       if (log.includes("→")) {
-        // Outgoing message: "You → peerId: message"
+        // Outgoing: "You → <groupId>:" or "You → group <groupId>:"
         const match = log.match(/You → ([^:]+):/);
-        return match && idsMatch(match[1].trim(), peerId);
+        if (!match) return false;
+        const targetInLog = parseOutgoingLogTargetId(match[1]);
+        return idsMatch(targetInLog, peerId);
       } else if (log.includes(":")) {
-        // Incoming message: "senderId: message" (backend may use different ID format)
+        // Group thread: peerId is Agora group id; logs use sender user id (patient or coach)
         const parts = log.split(":");
         const senderId = parts[0].trim();
-        return idsMatch(senderId, peerId);
+        const patientId =
+          selectedContact?.id != null ? String(selectedContact.id) : "";
+        if (patientId && idsMatch(senderId, patientId)) return true;
+        if (userId && idsMatch(senderId, userId)) return true;
+        return false;
       }
       return false;
     });
@@ -1351,7 +1369,7 @@ export default function FPChatInterface({
       );
       return [...otherPeerMessages, ...merged];
     });
-  }, [logs, peerId, selectedContact]);
+  }, [logs, peerId, selectedContact, userId]);
 
   // Sync chatClient prop to ref
   useEffect(() => {
@@ -1371,7 +1389,7 @@ export default function FPChatInterface({
     // Get the current peer from the ref to detect changes
     const currentFetchedPeer = fetchedPeersRef.current.currentPeer;
 
-    // If peerId changed, reset the fetched set for the new peer
+    // If peerId changed, reset the fetched set for the new peer (even before login)
     if (currentFetchedPeer !== peerId) {
       fetchedPeersRef.current.fetchedPeers = new Set();
       fetchedPeersRef.current.currentPeer = peerId;
@@ -1381,6 +1399,10 @@ export default function FPChatInterface({
       // Reset history strategy when peer changes
       agoraHistoryExhaustedRef.current = false;
       oldestAgoraTimestampMsRef.current = null;
+    }
+
+    if (!historyFetchEnabled) {
+      return;
     }
 
     // Check if we've already fetched history for this peer
@@ -1400,7 +1422,7 @@ export default function FPChatInterface({
     };
 
     checkAndFetch();
-  }, [peerId, chatClient]);
+  }, [peerId, chatClient, historyFetchEnabled]);
 
   // Filter messages to only show current conversation when displaying
   const currentConversationMessages = messages.filter(
@@ -2690,14 +2712,13 @@ export default function FPChatInterface({
     });
 
     try {
-      // Get targetId (remove "user_" prefix if present)
-      const targetId = peerId.startsWith("user_")
-        ? peerId.replace("user_", "")
-        : peerId;
-
-      const conversationId = peerId.startsWith("user_")
-        ? peerId
-        : `user_${peerId}`;
+      // Group id from list (conversationId) or token API (group_id) — numeric string, no user_ prefix
+      const agoraGroupId = String(
+        selectedContact?.groupId ??
+          selectedContact?.conversationId ??
+          peerId ??
+          ""
+      ).trim();
 
       // Cast chatClient to Connection type to access getHistoryMessages
       const client = chatClient as Connection & {
@@ -2712,11 +2733,11 @@ export default function FPChatInterface({
         }>;
       };
 
-      // 1) Fetch from Agora first (same as before)
+      // 1) Fetch from Agora (group chat only): targetId = group id, chatType = groupChat
       const agoraRes = await (client.getHistoryMessages
         ? client.getHistoryMessages({
-            targetId: targetId,
-            chatType: "singleChat",
+            targetId: agoraGroupId,
+            chatType: "groupChat",
             pageSize: config.chat.pageSize || 20,
             searchDirection: "up",
           })
@@ -2751,7 +2772,7 @@ export default function FPChatInterface({
 
         if (fromMs && !Number.isNaN(fromMs)) {
           const apiUrl = new URL(config.api.fetchMessages);
-          apiUrl.searchParams.append("conversationId", conversationId);
+          apiUrl.searchParams.append("conversationId", agoraGroupId);
           apiUrl.searchParams.append(
             "limit",
             String(config.chat.pageSize || 20)
@@ -2890,14 +2911,12 @@ export default function FPChatInterface({
       const prevScrollHeight = chatArea?.scrollHeight || 0;
       const prevScrollTop = chatArea?.scrollTop || 0;
 
-      // Get targetId (remove "user_" prefix if present)
-      const targetId = peerId.startsWith("user_")
-        ? peerId.replace("user_", "")
-        : peerId;
-
-      const conversationId = peerId.startsWith("user_")
-        ? peerId
-        : `user_${peerId}`;
+      const agoraGroupId = String(
+        selectedContact?.groupId ??
+          selectedContact?.conversationId ??
+          peerId ??
+          ""
+      ).trim();
 
       // Cast chatClient to Connection type to access getHistoryMessages
       const client = chatClient as Connection & {
@@ -2915,12 +2934,12 @@ export default function FPChatInterface({
 
       let newMessages: AgoraMessage[] = [];
 
-      // 1) Keep fetching from Agora until it returns an empty page.
+      // 1) Keep fetching from Agora until it returns an empty page (group chat only).
       if (!agoraHistoryExhaustedRef.current) {
         const agoraRes = await (client.getHistoryMessages
           ? client.getHistoryMessages({
-              targetId: targetId,
-              chatType: "singleChat",
+              targetId: agoraGroupId,
+              chatType: "groupChat",
               pageSize: 20,
               searchDirection: "up",
               cursor: cursor ? String(cursor) : undefined,
@@ -2931,7 +2950,7 @@ export default function FPChatInterface({
         const agoraCursor = agoraRes?.cursor;
 
         console.log("📥 [fetchMoreMessages] Agora Response received:", {
-          targetId,
+          targetId: agoraGroupId,
           cursor,
           hasCursor: !!agoraCursor,
           nextCursor: agoraCursor,
@@ -2971,7 +2990,7 @@ export default function FPChatInterface({
           setHasMore(false);
         } else {
           const apiUrl = new URL(config.api.fetchMessages);
-          apiUrl.searchParams.append("conversationId", conversationId);
+          apiUrl.searchParams.append("conversationId", agoraGroupId);
           apiUrl.searchParams.append("limit", "20");
           apiUrl.searchParams.append("from", String(fromMs));
           if (cursor) {
@@ -2991,7 +3010,7 @@ export default function FPChatInterface({
 
           console.log("📥 [fetchMoreMessages] API Response received:", {
             url: apiUrl.toString(),
-            conversationId,
+            conversationId: agoraGroupId,
             cursor,
             hasNextCursor: !!apiCursor,
             nextCursor: apiCursor,

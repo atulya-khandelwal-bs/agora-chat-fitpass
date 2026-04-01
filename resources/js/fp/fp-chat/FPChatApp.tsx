@@ -5,12 +5,21 @@ import FPChatInterface from "./components/FPChatInterface.tsx";
 import FPUserDetails from "./components/FPUserDetails.tsx";
 import FPCallApp from "../fp-call/FPCallApp.tsx";
 import AgoraChat from "agora-chat";
-import type { MessageBody } from "agora-chat";
 import { useChatClient } from "./hooks/useChatClient.ts";
 import config from "../common/config.ts";
 import { buildCustomExts } from "./utils/buildCustomExts.ts";
 import { createMessageHandlers } from "./utils/messageHandlers.ts";
-import { Contact, Message, CoachInfo, LogEntry, Product } from "../common/types/chat";
+import {
+  findContactForHistoryPeer,
+  findContactForOutgoingListUpdate,
+} from "./utils/conversationListMatch.ts";
+import {
+  Contact,
+  Message,
+  CoachInfo,
+  LogEntry,
+  Product,
+} from "../common/types/chat";
 import { CallEndData } from "../common/types/call";
 import axios from "axios";
 
@@ -133,7 +142,6 @@ function FPChatApp({
   onConversationChange,
 }: FPChatAppProps): React.JSX.Element {
   const [token, setToken] = useState<string | undefined>(undefined);
-  const [isGeneratingToken, setIsGeneratingToken] = useState<boolean>(false);
   const appKey = config.agora.appKey;
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
@@ -161,66 +169,73 @@ function FPChatApp({
   const isSendingRef = useRef<boolean>(false);
   // 🔹 Track if call end message has been sent to prevent duplicates
   const callEndMessageSentRef = useRef<boolean>(false);
-  // 🔹 Track processed message IDs to avoid duplicates in polling
-  const processedMessageIdsRef = useRef<Set<string>>(new Set());
-  // 🔹 Track last poll time to avoid too frequent polling (per-conversation)
-  const lastPollTimeRef = useRef<number>(0);
-  // 🔹 Track last global poll time separately to avoid conflicts
-  const lastGlobalPollTimeRef = useRef<number>(0);
-  // 🔹 Track logs in a ref so polling functions can access latest without triggering re-runs
-  const logsRef = useRef<(string | LogEntry)[]>([]);
-  // 🔹 Track registration promise to ensure login waits for it
-  const registrationPromiseRef = useRef<Promise<boolean> | null>(null);
+  /** Customer user id + list/API group id for getDietitianToken refresh */
+  const dietitianChatContextRef = useRef<{
+    customerUserId: string;
+    groupId: string | null;
+  } | null>(null);
+
+  const [isFetchingDietitianToken, setIsFetchingDietitianToken] =
+    useState<boolean>(false);
 
   const addLog = (log: string | LogEntry): void =>
     setLogs((prev) => {
       // Always add log entries, even if they're duplicates
       // This allows users to send the same message multiple times consecutively
-      const newLogs = [...prev, log];
-      logsRef.current = newLogs; // Update ref so polling functions can access latest without triggering re-runs
-      return newLogs;
+      return [...prev, log];
     });
 
-  // Helper function to generate a new token
-  const generateNewToken = async (): Promise<string | null> => {
-    if (!userId) {
-      addLog("Cannot renew token: No user ID");
-      return null;
-    }
-
-    try {
-      addLog(`Renewing chat token for ${userId}...`);
-      const tokenResponse = await fetch(config.api.generateToken, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          username: userId,
-          expireInSecs: config.token.expireInSecs,
-        }),
-      });
-
-      if (!tokenResponse.ok) {
-        const errorData = await tokenResponse.json().catch(() => ({}));
-        throw new Error(
-          errorData.error || `Token generation failed: ${tokenResponse.status}`
-        );
+  const getDietitianCredentials = React.useCallback(
+    async (
+      customerUserId: string,
+      groupIdForApi: string | null
+    ): Promise<{ token: string; group_id: string } | null> => {
+      try {
+        const res = await axios.post(config.api.getDietitianToken, {
+          user_id: Number(customerUserId),
+          dietitian_id: Number(userId),
+          group_id: groupIdForApi,
+        });
+        const newToken = res.data?.token as string | undefined;
+        const gid = res.data?.group_id as string | number | undefined;
+        if (newToken && gid != null && String(gid) !== "") {
+          return { token: newToken, group_id: String(gid) };
+        }
+        addLog("getDietitianToken: missing token or group_id in response");
+      } catch (error: unknown) {
+        const msg = axios.isAxiosError(error)
+          ? error.response?.data
+            ? JSON.stringify(error.response.data)
+            : error.message
+          : error instanceof Error
+            ? error.message
+            : String(error);
+        addLog(`getDietitianToken error: ${msg}`);
+        console.error("getDietitianToken:", error);
       }
+      return null;
+    },
+    [userId]
+  );
 
-      const tokenData = await tokenResponse.json();
-      const newToken = tokenData.token;
-      setToken(newToken); // Update token state
-      addLog(`Chat token renewed successfully`);
-      return newToken;
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      addLog(`Token renewal failed: ${errorMessage}`);
-      console.error("Token renewal error:", error);
+  const refreshChatToken = React.useCallback(async (): Promise<string | null> => {
+    const ctx = dietitianChatContextRef.current;
+    if (!ctx) {
+      addLog("Cannot refresh token: no active conversation context");
       return null;
     }
-  };
+    addLog("Refreshing chat token (getDietitianToken)...");
+    const result = await getDietitianCredentials(
+      ctx.customerUserId,
+      ctx.groupId
+    );
+    if (result?.token) {
+      setToken(result.token);
+      addLog("Chat token refreshed");
+      return result.token;
+    }
+    return null;
+  }, [getDietitianCredentials]);
 
   // Create a ref to store clientRef for handlers
   const clientRefForHandlers = useRef<unknown>(null);
@@ -230,25 +245,6 @@ function FPChatApp({
     setIncomingCall(callData);
   };
 
-  // // Handle presence status updates
-  // const handlePresenceStatus = (presenceData: {
-  //   userId: string;
-  //   description: string;
-  // }): void => {
-  //   // Show notification when peer is waiting in call
-  //   if (
-  //     presenceData.description === "waiting" &&
-  //     presenceData.userId === peerId
-  //   ) {
-  //     addLog(`🟡 ${presenceData.userId} is waiting for you in the call!`);
-  //     // You can add a toast notification here if needed
-  //   } else if (
-  //     presenceData.description === "in_call" &&
-  //     presenceData.userId === peerId
-  //   ) {
-  //     addLog(`🟢 ${presenceData.userId} joined the call`);
-  //   }
-  // };
 
   // Create handlers - they will use clientRefForHandlers.current
   const handlers = createMessageHandlers({
@@ -257,7 +253,7 @@ function FPChatApp({
     setIsLoggingIn: () => {}, // Not used in chat app, login handled by parent
     addLog,
     setConversations,
-    generateNewToken,
+    generateNewToken: refreshChatToken,
     handleIncomingCall,
     // onPresenceStatus: handlePresenceStatus,
     get clientRef() {
@@ -272,62 +268,13 @@ function FPChatApp({
     clientRefForHandlers.current = clientRef.current;
   }, [clientRef]);
 
-  // Update logs ref whenever logs change
-  useEffect(() => {
-    logsRef.current = logs;
-  }, [logs]);
-
-  useEffect(() => {
-    // peerId updated
-  }, [peerId]);
-
-  // Generate token automatically when userId is available (on mount)
-  useEffect(() => {
-    if (userId && !token && !isGeneratingToken) {
-      generateToken().catch((error) => {
-        console.error("[FPChatApp] Failed to auto-generate token:", error);
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]); // Only depend on userId to run once on mount
-
-  // Register current user with Agora before login (required for message roaming)
-  useEffect(() => {
-    const registerCurrentUser = async (): Promise<void> => {
-      if (!userId || isLoggedIn) {
-        return;
-      }
-
-      try {
-        registrationPromiseRef.current = registerUser(userId);
-        await registrationPromiseRef.current;
-      } catch (error) {
-        console.error("[FPChatApp] Error registering user:", error);
-        // Don't block login if registration fails - user might already be registered
-      }
-    };
-
-    registerCurrentUser();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, isLoggedIn]);
-
-  // Auto-login when userId and token are provided
+  // Auto-login when dietitian userId and token are set (token comes from getDietitianToken on conversation tap)
   useEffect(() => {
     const attemptLogin = async (): Promise<void> => {
       if (!userId || !token || isLoggedIn || !clientRef.current) {
         return;
       }
 
-      // Wait for registration to complete if in progress
-      if (registrationPromiseRef.current) {
-        try {
-          await registrationPromiseRef.current;
-        } catch {
-          // Continue even if registration failed (user might already exist)
-        }
-      }
-
-      // Automatically login with the provided token
       if (
         typeof (
           clientRef.current as unknown as {
@@ -336,14 +283,12 @@ function FPChatApp({
         ).open === "function"
       ) {
         try {
-          // Use original userId - Agora Chat SDK handles multi-session natively
           const loginPromise = (
             clientRef.current as unknown as {
               open: (options: { user: string; accessToken: string }) => Promise<void> | void;
             }
           ).open({ user: userId, accessToken: token });
-          
-          // Handle promise if open returns one
+
           if (loginPromise && typeof loginPromise.then === "function") {
             loginPromise
               .then(() => {
@@ -351,103 +296,22 @@ function FPChatApp({
               })
               .catch((error) => {
                 console.error("[FPChatApp] Login promise rejected:", error);
-                const errorMessage = error instanceof Error ? error.message : String(error);
+                const errorMessage =
+                  error instanceof Error ? error.message : String(error);
                 addLog(`Login failed: ${errorMessage}`);
-                
-                // If login fails with 401, try to regenerate token
-                if (errorMessage.includes("401") || errorMessage.includes("Unauthorized") || errorMessage.includes("token")) {
-                  generateToken().catch((genError) => {
-                    console.error("[FPChatApp] Failed to regenerate token:", genError);
-                  });
-                }
               });
           }
         } catch (error) {
           console.error("[FPChatApp] Error during login:", error);
-          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
           addLog(`Login error: ${errorMessage}`);
-          
-          // If login fails with 401, try to regenerate token
-          if (errorMessage.includes("401") || errorMessage.includes("Unauthorized") || errorMessage.includes("token")) {
-            generateToken().catch((genError) => {
-              console.error("[FPChatApp] Failed to regenerate token:", genError);
-            });
-          }
         }
-      } else {
-        // Client open method not available
       }
     };
 
     attemptLogin();
   }, [userId, token, isLoggedIn, clientRef]);
-
-  // Internal function to generate token for the coach
-  const generateToken = async (): Promise<string | null> => {
-    setIsGeneratingToken(true);
-    try {
-      addLog(`Generating chat token for ${userId}...`);
-      const tokenResponse = await fetch(config.api.generateToken, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          username: userId,
-          expireInSecs: config.token.expireInSecs,
-        }),
-      });
-
-      if (!tokenResponse.ok) {
-        const errorData = await tokenResponse.json().catch(() => ({}));
-        const errorMessage =
-          errorData.error || `Token generation failed: ${tokenResponse.status}`;
-        console.error("❌ [generateToken] Token generation failed:", {
-          status: tokenResponse.status,
-          error: errorMessage,
-          userId,
-        });
-        addLog(`Token generation failed: ${errorMessage}`);
-        setIsGeneratingToken(false);
-        return null;
-      }
-
-      const tokenData = await tokenResponse.json();
-      const newToken = tokenData.token;
-      if (!newToken) {
-        console.error("❌ [generateToken] No token in response:", tokenData);
-        addLog("Token generation failed: No token in response");
-        setIsGeneratingToken(false);
-        return null;
-      }
-      
-      setToken(newToken);
-      addLog(`Chat token generated successfully`);
-      setIsGeneratingToken(false);
-      return newToken;
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      console.error("❌ [generateToken] Token generation error:", {
-        error: errorMessage,
-        userId,
-      });
-      addLog(`Token generation failed: ${errorMessage}`);
-      console.error("Token generation error:", error);
-      setIsGeneratingToken(false);
-      return null;
-    }
-  };
-
-  // Helper function to ensure token exists before connecting
-  const ensureToken = async (): Promise<string | null> => {
-    if (token) {
-      return token;
-    }
-
-    // Generate token internally
-    return await generateToken();
-  };
 
   const getRandomProducts = (count: number): Product[] => {
     const shuffled = [...PRODUCT_SUGGESTIONS].sort(() => 0.5 - Math.random());
@@ -455,8 +319,19 @@ function FPChatApp({
   };
 
   const handleSendProductSuggestions = async (): Promise<void> => {
-    if (!peerId || !userId) {
+    if (!userId) {
       addLog("Select a conversation before sending product suggestions.");
+      return;
+    }
+
+    const productTargetGroupId = String(
+      selectedContact?.groupId ??
+        selectedContact?.conversationId ??
+        peerId ??
+        ""
+    ).trim();
+    if (!productTargetGroupId) {
+      addLog("No group id for product message.");
       return;
     }
 
@@ -492,7 +367,7 @@ function FPChatApp({
 
       const body = {
         from: userId,
-        to: peerId,
+        to: productTargetGroupId,
         type: "recommended_products",
         data: payload,
       };
@@ -624,10 +499,16 @@ function FPChatApp({
             userId: string | number;
             userName?: string;
             userPhoto?: string;
-            lastMessage?: string | object;
+            lastMessage?: string | object | null;
             lastMessageTime?: string | Date;
+            lastMessageAt?: string | Date | null;
+            lastMessageAtMs?: number | null;
+            lastMessageId?: string | null;
+            lastMessageType?: string | null;
             lastMessageSender?: string | number;
-            conversationId?: string;
+            conversationId?: string | number | null;
+            isGroupConversation?: boolean | null;
+            participantIds?: number[];
             messageCount?: number;
             unreadCount?: number;
             filterState?: string;
@@ -854,26 +735,40 @@ function FPChatApp({
               userId: string | number;
               userName?: string;
               userPhoto?: string;
-              lastMessage?: string | object;
+              lastMessage?: string | object | null;
               lastMessageTime?: string | Date;
+              lastMessageAt?: string | Date | null;
+              lastMessageAtMs?: number | null;
               lastMessageSender?: string | number;
-              conversationId?: string;
+              conversationId?: string | number | null;
+              isGroupConversation?: boolean | null;
+              participantIds?: number[];
               messageCount?: number;
               unreadCount?: number;
               filterState?: string;
               createdAt?: string | Date;
             }) => {
-              // Generate preview from lastMessage (handles both string and object formats)
               const lastMessage = generatePreviewFromLastMessage(
-                conv.lastMessage
+                conv.lastMessage ?? undefined
               );
 
-              const conversationId = String(conv.userId);
-              const normalizedConversationId = normalizeId(conversationId);
+              const memberUserId = String(conv.userId);
+              const normalizedConversationId = normalizeId(memberUserId);
               const existingTimestamp = existingTimestamps.get(
                 normalizedConversationId
               );
-              const apiTimestamp = conv.lastMessageTime
+
+              const fromLastMessageAt =
+                conv.lastMessageAt != null &&
+                String(conv.lastMessageAt).trim() !== ""
+                  ? new Date(conv.lastMessageAt as string | Date)
+                  : null;
+              const fromLastMessageAtMs =
+                typeof conv.lastMessageAtMs === "number" &&
+                !Number.isNaN(conv.lastMessageAtMs)
+                  ? new Date(conv.lastMessageAtMs)
+                  : null;
+              const fromLegacyTime = conv.lastMessageTime
                 ? new Date(conv.lastMessageTime)
                 : null;
               const createdAtTimestamp = conv.createdAt
@@ -884,7 +779,10 @@ function FPChatApp({
                 ...candidates: Array<Date | null | undefined>
               ) => {
                 for (const candidate of candidates) {
-                  if (candidate instanceof Date && !Number.isNaN(candidate.getTime())) {
+                  if (
+                    candidate instanceof Date &&
+                    !Number.isNaN(candidate.getTime())
+                  ) {
                     return candidate;
                   }
                 }
@@ -892,26 +790,39 @@ function FPChatApp({
               };
 
               const timestamp = pickValidDate(
-                apiTimestamp,
+                fromLastMessageAt,
+                fromLastMessageAtMs,
+                fromLegacyTime,
                 createdAtTimestamp,
-                existingTimestamp instanceof Date ? existingTimestamp : existingTimestamp ? new Date(existingTimestamp) : null
+                existingTimestamp instanceof Date
+                  ? existingTimestamp
+                  : existingTimestamp
+                    ? new Date(existingTimestamp)
+                    : null
               );
 
+              const listGroupId =
+                conv.conversationId != null &&
+                String(conv.conversationId).trim() !== ""
+                  ? String(conv.conversationId)
+                  : null;
+
               return {
-                id: conversationId, // Use userId as Agora ID (string)
+                id: memberUserId,
                 name: conv.userName || `User ${conv.userId}`,
                 avatar: conv.userPhoto || config.defaults.avatar,
-                lastMessage: lastMessage ?? undefined, // Convert null to undefined
+                lastMessage: lastMessage ?? undefined,
                 timestamp: timestamp,
                 lastMessageFrom: conv.lastMessageSender
                   ? String(conv.lastMessageSender)
                   : null,
-                // Store additional API data for reference
-                conversationId: conv.conversationId,
+                conversationId: listGroupId,
+                isGroupConversation: conv.isGroupConversation ?? null,
+                participantIds: conv.participantIds,
                 messageCount: conv.messageCount || 0,
                 unreadCount: conv.unreadCount || 0,
                 filterState: conv.filterState,
-                createdAt: conv.createdAt ? new Date(conv.createdAt) : undefined, // Chat initiation date/time
+                createdAt: conv.createdAt ? new Date(conv.createdAt) : undefined,
               };
             }
           );
@@ -956,336 +867,7 @@ function FPChatApp({
 
     fetchConversations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoggedIn, userId, filterType, sortOrder, onConversationChange]); // Removed selectedContact to prevent re-fetch on selection
-
-  // Poll for recent messages to catch backend-sent messages that might not trigger handlers
-  useEffect(() => {
-    if (!peerId || !clientRef.current || !isLoggedIn) {
-      return;
-    }
-
-    const POLL_INTERVAL = 3000; // Poll every 3 seconds
-    const MIN_POLL_INTERVAL = 1000; // Minimum 1 second between polls
-
-    const pollForMessages = async (): Promise<void> => {
-      const now = Date.now();
-      // Throttle polling to avoid too frequent requests
-      if (now - lastPollTimeRef.current < MIN_POLL_INTERVAL) {
-        return;
-      }
-      lastPollTimeRef.current = now;
-
-      try {
-        const targetId = peerId.startsWith("user_")
-          ? peerId.replace("user_", "")
-          : peerId;
-
-        const client = clientRef.current as {
-          getHistoryMessages?: (options: {
-            targetId: string;
-            chatType: string;
-            pageSize: number;
-            searchDirection: string;
-          }) => Promise<{
-            messages?: unknown[];
-            cursor?: string;
-          }>;
-        };
-
-        if (!client.getHistoryMessages) {
-          return;
-        }
-
-        // Fetch only the most recent message to check for new ones
-        const result = await client.getHistoryMessages({
-          targetId,
-          chatType: "singleChat",
-          pageSize: 1,
-          searchDirection: "up",
-        });
-
-        const messages = (result?.messages || []) as Array<{
-          id?: string;
-          mid?: string;
-          from?: string;
-          to?: string;
-          time?: number;
-          type?: string;
-          msg?: string;
-          customExts?: unknown;
-          "v2:customExts"?: unknown;
-          body?: unknown;
-          ext?: unknown;
-        }>;
-
-        if (messages.length > 0) {
-          const latestMessage = messages[0];
-          const messageId =
-            latestMessage.id ||
-            latestMessage.mid ||
-            `${latestMessage.from}-${latestMessage.time}`;
-
-          // Check if we've already processed this message
-          if (!processedMessageIdsRef.current.has(messageId)) {
-            processedMessageIdsRef.current.add(messageId);
-
-            // Check if this message is already in logs (use ref to get latest without triggering re-runs)
-            const messageInLogs = logsRef.current.some((log) => {
-              if (typeof log === "string") {
-                return log.includes(messageId);
-              }
-              return log.serverMsgId === messageId;
-            });
-
-            if (!messageInLogs) {
-              // This is a new message that wasn't caught by handlers
-              // Process it through the handlers manually
-
-              // Trigger the appropriate handler based on message type
-              if (latestMessage.type === "custom" && handlers.onCustomMessage) {
-                handlers.onCustomMessage(latestMessage as MessageBody);
-              } else if (
-                latestMessage.type === "txt" &&
-                handlers.onTextMessage
-              ) {
-                handlers.onTextMessage(latestMessage as MessageBody);
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.error("Error polling for messages:", error);
-      }
-    };
-
-    // Poll immediately, then set up interval
-    pollForMessages();
-    const intervalId = setInterval(pollForMessages, POLL_INTERVAL);
-
-    return () => {
-      clearInterval(intervalId);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [peerId, isLoggedIn, clientRef]); // Removed logs.length - it was causing constant re-runs
-
-  // Global message polling for all conversations (not just active one)
-  // This ensures messages are received even when not actively viewing a conversation
-  useEffect(() => {
-    return;
-    if (!isLoggedIn || !clientRef.current || conversations.length === 0) {
-      return;
-    }
-
-    const GLOBAL_POLL_INTERVAL = 10000; // Poll every 10 seconds for all conversations
-    const MIN_GLOBAL_POLL_INTERVAL = 2000; // Minimum 2 seconds between global polls
-    const DELAY_BETWEEN_REQUESTS = 50; // 50ms delay between each conversation request to space them out
-
-    const pollAllConversations = async (): Promise<void> => {
-      const now = Date.now();
-      // Throttle global polling separately from per-conversation polling
-      if (now - lastGlobalPollTimeRef.current < MIN_GLOBAL_POLL_INTERVAL) {
-        return;
-      }
-      lastGlobalPollTimeRef.current = now;
-
-      try {
-        const client = clientRef.current as {
-          getHistoryMessages?: (options: {
-            targetId: string;
-            chatType: string;
-            pageSize: number;
-            searchDirection: string;
-          }) => Promise<{
-            messages?: unknown[];
-            cursor?: string;
-          }>;
-        };
-
-        if (!client.getHistoryMessages) {
-          return;
-        }
-
-        // Get the active peerId to skip it (it's already being polled every 3 seconds)
-        const activePeerId = peerId.startsWith("user_")
-          ? peerId.replace("user_", "")
-          : peerId;
-
-        // Poll all conversations for new messages (except the active one)
-        let requestCount = 0;
-        for (const conversation of conversations) {
-          const targetId = conversation.id.startsWith("user_")
-            ? conversation.id.replace("user_", "")
-            : conversation.id;
-
-          // Skip the active conversation - it's already being polled every 3 seconds
-          if (targetId === activePeerId) {
-            continue;
-          }
-
-          // Add a small delay between requests to space them out (except for the first one)
-          if (requestCount > 0) {
-            await new Promise((resolve) => setTimeout(resolve, DELAY_BETWEEN_REQUESTS));
-          }
-          requestCount++;
-
-          try {
-            const result = await client.getHistoryMessages({
-              targetId,
-              chatType: "singleChat",
-              pageSize: 1,
-              searchDirection: "up",
-            });
-
-            const messages = (result?.messages || []) as Array<{
-              id?: string;
-              mid?: string;
-              from?: string;
-              to?: string;
-              time?: number;
-              type?: string;
-              msg?: string;
-              customExts?: unknown;
-              "v2:customExts"?: unknown;
-              body?: unknown;
-              ext?: unknown;
-            }>;
-
-            if (messages.length > 0) {
-              const latestMessage = messages[0];
-              const messageId =
-                latestMessage.id ||
-                latestMessage.mid ||
-                `${latestMessage.from}-${latestMessage.time}`;
-
-              // Check if we've already processed this message
-              if (!processedMessageIdsRef.current.has(messageId)) {
-                processedMessageIdsRef.current.add(messageId);
-
-                // Check if this message is already in logs (use ref to get latest without triggering re-runs)
-                const messageInLogs = logsRef.current.some((log) => {
-                  if (typeof log === "string") {
-                    return log.includes(messageId);
-                  }
-                  return log.serverMsgId === messageId;
-                });
-
-                if (!messageInLogs) {
-
-                  // Trigger the appropriate handler
-                  if (latestMessage.type === "custom" && handlers.onCustomMessage) {
-                    handlers.onCustomMessage(latestMessage as MessageBody);
-                  } else if (
-                    latestMessage.type === "txt" &&
-                    handlers.onTextMessage
-                  ) {
-                    handlers.onTextMessage(latestMessage as MessageBody);
-                  }
-                }
-              }
-            }
-          } catch (error) {
-            console.error(
-              `❌ [Global Polling] Error polling conversation ${conversation.id}:`,
-              error
-            );
-          }
-        }
-      } catch (error) {
-        console.error("❌ [Global Polling] Error in global polling:", error);
-      }
-    };
-
-    // Poll immediately, then set up interval
-    pollAllConversations();
-    const intervalId = setInterval(pollAllConversations, GLOBAL_POLL_INTERVAL);
-
-    return () => {
-      clearInterval(intervalId);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoggedIn, clientRef, conversations, peerId]); // Include peerId to skip active conversation in global polling
-
-  // Register a user with Agora (called when selecting a user)
-  const registerUser = async (username: string): Promise<boolean> => {
-    try {
-      const endpoint = config.api.registerUserEndpoint;
-      const requestBody = { username: username };
-
-      // console.log("🔵 [REGISTER API] Calling registration API:", {
-      //   endpoint,
-      //   method: "POST",
-      //   body: requestBody,
-      //   timestamp: new Date().toISOString(),
-      // });
-
-      addLog(`Registering user ${username}...`);
-
-      const registerResponse = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      // console.log("🟢 [REGISTER API] Response received:", {
-      //   status: registerResponse.status,
-      //   statusText: registerResponse.statusText,
-      //   ok: registerResponse.ok,
-      //   url: registerResponse.url,
-      // });
-
-      if (registerResponse.ok) {
-        // const responseData = await registerResponse.json().catch(() => ({}));
-        // console.log("✅ [REGISTER API] Registration successful:", responseData);
-        await registerResponse.json().catch(() => ({})); // Consume response body
-        addLog(`User ${username} registered successfully`);
-        return true;
-      } else {
-        // User might already be registered
-        const errorData = await registerResponse.json().catch(() => ({}));
-        // console.log("⚠️ [REGISTER API] Registration response (not ok):", {
-        //   status: registerResponse.status,
-        //   errorData,
-        // });
-
-        // Check if user already exists by status code OR error message
-        const errorMessage = errorData.message || errorData.error || '';
-        const isDuplicateUser = 
-          registerResponse.status === 400 ||
-          registerResponse.status === 409 ||
-          errorMessage.includes('duplicate_unique_property_exists') ||
-          errorMessage.includes('DuplicateUniquePropertyExistsException') ||
-          errorMessage.toLowerCase().includes('already exists') ||
-          errorMessage.toLowerCase().includes('duplicate');
-
-        if (isDuplicateUser) {
-          // console.log("ℹ️ [REGISTER API] User already exists, proceeding...");
-          addLog(`User ${username} already exists, proceeding...`);
-          return true; // User exists, can proceed
-        } else {
-          // console.warn("❌ [REGISTER API] Registration failed:", {
-          //   status: registerResponse.status,
-          //   error: errorData.error || registerResponse.status,
-          // });
-          addLog(
-            `Registration warning: ${
-              errorData.error || registerResponse.status
-            }`
-          );
-          return false;
-        }
-      }
-    } catch (registerError) {
-      const errorMessage =
-        registerError instanceof Error
-          ? registerError.message
-          : String(registerError);
-      // console.error("❌ [REGISTER API] Registration error:", registerError);
-      addLog(`Registration error: ${errorMessage}`);
-      return false;
-    }
-  };
+  }, [userId, filterType, sortOrder, onConversationChange]);
 
   const handleLogout = (): void => {
     if (
@@ -1295,6 +877,8 @@ function FPChatApp({
       (clientRef.current as { close: () => void }).close();
     }
     setIsLoggedIn(false);
+    setToken(undefined);
+    dietitianChatContextRef.current = null;
     setSelectedContact(null);
     setConversations([]);
     setPeerId("");
@@ -1316,54 +900,77 @@ function FPChatApp({
     onConversationChange(nextId);
   };
 
-  const handleSelectContact = async (contact: Contact): Promise<void> => {
-    // console.log("👤 [USER SELECTION] User selected:", {
-    //   contactId: contact.id,
-    //   contactName: contact.name,
-    //   timestamp: new Date().toISOString(),
-    // });
-
-    // Generate token if not already available
-    if (!token && !isLoggedIn) {
-      const newToken = await ensureToken(); 
-      if (!newToken) {
-        addLog("Failed to generate token. Cannot connect to chat.");
-        return;
-      }
-    }
-
-    // Don't allow selecting blocked UIDs (Recorder and RTST Agent) as a contact
+  const handleSelectContact = async (contact: Contact): Promise<boolean> => {
     const contactId = String(contact.id);
     if (contactId === "999999999" || contactId === "999999998") {
-      return;
+      return false;
     }
 
-    // No need to register the contact - they should already be registered in Agora
-    // Only the current user (userId) needs to be registered, which happens on app load
-    setSelectedContact(contact);
-    setPeerId(contact.id);
-    // setPeerId("1941");
-    handleConversationChange(contact);
-    // Update conversation in list or add if new (don't update timestamp on selection)
-    setConversations((prev) => {
-      const existing = prev.find((c) => c.id === contact.id);
-      if (existing) {
-        return prev.map((c) =>
-          c.id === contact.id ? { ...c, ...contact } : c
-        );
+    setIsFetchingDietitianToken(true);
+    try {
+      if (
+        clientRef.current &&
+        typeof (clientRef.current as { close: () => void }).close === "function"
+      ) {
+        (clientRef.current as { close: () => void }).close();
       }
-      return [
-        ...prev,
-        {
-          ...contact,
-          lastMessage: "",
-          timestamp: new Date(),
-          avatar:
-            contact.avatar ||
-            "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face",
-        },
-      ];
-    });
+      setIsLoggedIn(false);
+      setToken(undefined);
+
+      const listGroupId =
+        contact.conversationId != null &&
+        String(contact.conversationId).trim() !== ""
+          ? String(contact.conversationId)
+          : null;
+
+      const result = await getDietitianCredentials(contactId, listGroupId);
+      if (!result) {
+        addLog(
+          "Failed to open conversation: getDietitianToken did not return a token."
+        );
+        return false;
+      }
+
+      const merged: Contact = {
+        ...contact,
+        conversationId: result.group_id,
+        groupId: result.group_id,
+      };
+
+      dietitianChatContextRef.current = {
+        customerUserId: contactId,
+        groupId: result.group_id,
+      };
+
+      setPeerId(result.group_id);
+      setToken(result.token);
+      setSelectedContact(merged);
+      handleConversationChange(merged);
+
+      setConversations((prev) => {
+        const existing = prev.find((c) => c.id === contact.id);
+        if (existing) {
+          return prev.map((c) =>
+            c.id === contact.id ? { ...c, ...merged } : c
+          );
+        }
+        return [
+          ...prev,
+          {
+            ...merged,
+            lastMessage: merged.lastMessage ?? "",
+            timestamp: merged.timestamp ?? new Date(),
+            avatar:
+              merged.avatar ||
+              "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face",
+          },
+        ];
+      });
+
+      return true;
+    } finally {
+      setIsFetchingDietitianToken(false);
+    }
   };
 
   const handleAddConversation = (contact: Contact): void => {
@@ -1390,14 +997,22 @@ function FPChatApp({
   const handleSelectConversation = async (
     conversation: Contact
   ): Promise<void> => {
-    await handleSelectContact(conversation);
-    // On mobile, show chat view when conversation is selected
-    if (isMobileView) {
+    const ok = await handleSelectContact(conversation);
+    if (ok && isMobileView) {
       setShowChatOnMobile(true);
     }
   };
 
   const handleBackToConversations = (): void => {
+    if (
+      clientRef.current &&
+      typeof (clientRef.current as { close: () => void }).close === "function"
+    ) {
+      (clientRef.current as { close: () => void }).close();
+    }
+    setIsLoggedIn(false);
+    setToken(undefined);
+    dietitianChatContextRef.current = null;
     setSelectedContact(null);
     setPeerId("");
     setMessage("");
@@ -1409,17 +1024,17 @@ function FPChatApp({
   const handleInitiateCall = async (
     callType: "video" | "audio" = "video"
   ): Promise<void> => {
-    if (!peerId || !userId) {
-      addLog("Cannot initiate call: Missing user or peer ID");
+    const customerId = selectedContact?.id
+      ? String(selectedContact.id)
+      : "";
+    if (!customerId || !userId) {
+      addLog("Cannot initiate call: Missing customer or coach ID");
       return;
     }
 
-    // Generate channel name using format: fp_rtc_call_CALLTYPE_USERID_DIETITIANID
-    // CALLTYPE => video or voice
-    // USERID => userId (the user's ID)
-    // DIETITIANID => peerId (the dietitian/coach ID)
+    // Channel: customer (member) id + dietitian (coach) id — not the Agora group id
     const callTypeStr = callType === "video" ? "video" : "voice";
-    const channel = `fp_rtc_call_${callTypeStr}_${peerId}_${userId}`;
+    const channel = `fp_rtc_call_${callTypeStr}_${customerId}_${userId}`;
 
     // Reset call end message sent flag for new call
     callEndMessageSentRef.current = false;
@@ -1433,16 +1048,16 @@ function FPChatApp({
     // Set active call state
     setActiveCall({
       userId,
-      peerId,
+      peerId: customerId,
       channel,
       isInitiator: true,
       callType: callType,
       localUserName: coachInfo.coachName || userId, // Use coachName from coachInfo
-      peerName: selectedContact?.name || peerId,
+      peerName: selectedContact?.name || customerId,
       peerAvatar: selectedContact?.avatar,
     });
 
-    addLog(`Initiating ${callType} call with ${peerId}`);
+    addLog(`Initiating ${callType} call with ${customerId}`);
   };
 
   // Handle accept call
@@ -1469,20 +1084,6 @@ function FPChatApp({
     setIncomingCall(null);
   };
 
-  // function formatDurationFromSeconds(totalSeconds: number): string {
-  //   const hours = Math.floor(totalSeconds / 3600);
-  //   const minutes = Math.floor((totalSeconds % 3600) / 60);
-  //   const seconds = totalSeconds % 60;
-
-  //   const parts = [];
-
-  //   if (hours > 0) parts.push(`${hours} hr${hours > 1 ? "s" : ""}`);
-  //   if (minutes > 0) parts.push(`${minutes} min${minutes > 1 ? "s" : ""}`);
-  //   if (seconds > 0 || parts.length === 0)
-  //     parts.push(`${seconds} sec${seconds > 1 ? "s" : ""}`);
-
-  //   return parts.join(" ");
-  // }
 
   // Handle reject call
   // @ts-expect-error - May be used in future for incoming call handling
@@ -1510,94 +1111,6 @@ function FPChatApp({
       return;
     }
 
-    // const bothUsersConnected = callInfo.bothUsersConnected === true;
-
-    // // Calculate duration - use provided duration or calculate from timestamps
-    // let duration = callInfo.duration || 0;
-    // if (duration <= 0 && callInfo.callStartTime && callInfo.callEndTime) {
-    //   duration = Math.floor(
-    //     (callInfo.callEndTime - callInfo.callStartTime) / 1000
-    //   );
-    // }
-
-    // Ensure duration is at least 0 (not negative)
-    // duration = Math.max(0, duration);
-
-    // if (!bothUsersConnected || duration <= 0) {
-    //   console.log("📞 Call End Message - NOT sending (conditions not met):", {
-    //     bothUsersConnected,
-    //     duration,
-    //   });
-    //   addLog(
-    //     "Call ended without other user joining. Not sending call summary to backend."
-    //   );
-    //   setActiveCall(null);
-    //   setIncomingCall(null);
-    //   setMessage("");
-    //   return;
-    // }
-
-    // try {
-    // // Determine message type and title based on call type
-    // const isVideoCall = activeCall.callType === "video";
-    // const messageType = isVideoCall ? "video_call" : "voice_call";
-    // const callTitle = isVideoCall ? "Video call" : "Voice call";
-
-    // // Send call end message with duration
-    // const payload = {
-    //   title: callTitle,
-    //   description: `${formatDurationFromSeconds(duration)}`,
-    //   icons_details: {
-    //     left_icon: "",
-    //     right_icon: "",
-    //   },
-    //   call_details: {
-    //     call_url: "",
-    //   },
-    //   redirection_details: [],
-    // };
-
-    // const body = {
-    //   from: userId,
-    //   to: peerId,
-    //   type: messageType,
-    //   data: payload,
-    // };
-
-    // try {
-    //   const response = await axios.post(config.api.customMessage, body);
-    //   console.log(`${callTitle} message sent successfully:`, response.data);
-
-    //   // Mark call end message as sent to prevent duplicates
-    //   callEndMessageSentRef.current = true;
-
-    //   // Add message directly to logs for real-time display
-    //   if (addLog) {
-    //     const messageToLog = JSON.stringify({
-    //       type: messageType,
-    //       ...payload,
-    //     });
-    //     addLog({
-    //       log: `You → ${peerId}: ${messageToLog}`,
-    //       timestamp: new Date(),
-    //     });
-    //   }
-    // } catch (error) {
-    //   console.error(
-    //     `Error sending ${callTitle.toLowerCase()} message:`,
-    //     error
-    //   );
-    // }
-
-    // addLog(`${callTitle} ended. Duration: ${duration}s`);
-    // } catch (error) {
-    //   console.error("Error sending call end message:", error);
-    //   const errorMessage =
-    //     error instanceof Error ? error.message : String(error);
-    //   addLog(`Failed to send call end message: ${errorMessage}`);
-    //   // Reset flag on error so it can be retried if needed
-    //   callEndMessageSentRef.current = false;
-    // }
 
     // Clear call state
     setActiveCall(null);
@@ -1720,23 +1233,8 @@ function FPChatApp({
       : new Date();
     const lastMessageFrom = formattedMsg.sender || peerId;
 
-    // Normalize: try both with and without user_ prefix
-    const normalizedPeerId = peerId.startsWith("user_")
-      ? peerId
-      : `user_${peerId}`;
-    const normalizedPeerIdWithoutPrefix = peerId.startsWith("user_")
-      ? peerId.replace("user_", "")
-      : peerId;
-
     setConversations((prev) => {
-      // Find conversation by matching either format
-      const existing = prev.find(
-        (c) =>
-          c.id === peerId ||
-          c.id === normalizedPeerId ||
-          c.id === normalizedPeerIdWithoutPrefix ||
-          c.id === `user_${normalizedPeerIdWithoutPrefix}`
-      );
+      const existing = findContactForHistoryPeer(prev, peerId);
 
       console.log(
         "🔄 [updateLastMessageFromHistory] Conversation search result:",
@@ -1792,10 +1290,26 @@ function FPChatApp({
       return;
     }
 
-    if (!peerId) {
-      addLog("No recipient selected");
+    if (!peerId && !selectedContact) {
+      addLog("No conversation selected");
       return;
     }
+
+    const groupId = String(
+      selectedContact?.groupId ??
+        selectedContact?.conversationId ??
+        peerId ??
+        ""
+    ).trim();
+
+    if (!groupId) {
+      addLog("No group id for sending");
+      return;
+    }
+
+    const memberListId = selectedContact?.id
+      ? String(selectedContact.id)
+      : "";
 
     // Use the override message if provided, otherwise use the message prop
     // This ensures we get the exact message value without race conditions
@@ -1833,7 +1347,7 @@ function FPChatApp({
         // Handle both string and object messages
         let apiBody: { from: string; to: string; type: string; data?: unknown } = {
           from: userId,
-          to: peerId,
+          to: groupId,
           type: "text",
         };
 
@@ -1892,20 +1406,23 @@ function FPChatApp({
             ? messageToSend 
             : "Message";
           setConversations((prev) => {
-            const existing = prev.find((c) => c.id === peerId);
-            if (existing) {
-              return prev.map((conv) =>
-                conv.id === peerId
-                  ? {
-                      ...conv,
-                      lastMessage: preview,
-                      timestamp: new Date(),
-                      lastMessageFrom: userId,
-                    }
-                  : conv
-              );
-            }
-            return prev;
+            const existing = findContactForOutgoingListUpdate(
+              prev,
+              memberListId,
+              groupId
+            );
+            if (!existing) return prev;
+            const conversationId = existing.id;
+            return prev.map((conv) =>
+              conv.id === conversationId
+                ? {
+                    ...conv,
+                    lastMessage: preview,
+                    timestamp: new Date(),
+                    lastMessageFrom: userId,
+                  }
+                : conv
+            );
           });
 
           isSendingRef.current = false;
@@ -1964,11 +1481,13 @@ function FPChatApp({
         }
       }
 
-      // Prepare ext properties with sender info
+      // Prepare ext properties with sender info (patient / member user id for group context)
+      const ALWAYS_SEND_PATIENT_ID = memberListId;
       const extProperties = {
         senderName: coachInfo.coachName || userId,
         senderProfile: coachInfo.profilePhoto || config.defaults.avatar,
         isFromUser: false,
+        targetUserId: ALWAYS_SEND_PATIENT_ID,
       };
 
       let options: {
@@ -1994,21 +1513,21 @@ function FPChatApp({
           return;
         }
 
-        // Default: send as Agora custom message
+        // Default: send as Agora custom message (group id = Agora group target)
         options = {
           type: "custom",
-          to: peerId,
-          chatType: "singleChat",
+          to: groupId,
+          chatType: "groupChat",
           customEvent: "customEvent",
           customExts,
           ext: extProperties,
         };
       } else {
-        // Plain text message
+        // Plain text message (group)
         options = {
-          chatType: "singleChat",
+          chatType: "groupChat",
           type: "txt",
-          to: peerId,
+          to: groupId,
           msg: messageString,
           ext: extProperties,
         };
@@ -2052,7 +1571,7 @@ function FPChatApp({
         if (serverMsgId) {
           // Add serverMsgId to the log entry so it can be used when creating messages
           addLog({
-            log: `You → ${peerId}: ${messageString}`,
+            log: `You → group ${groupId}: ${messageString}`,
             timestamp: new Date(),
             serverMsgId: serverMsgId, // Store serverMsgId with the log
           });
@@ -2062,7 +1581,7 @@ function FPChatApp({
         }
       } else {
         // If send failed, still add to log
-        addLog(`You → ${peerId}: ${messageString}`);
+        addLog(`You → group ${groupId}: ${messageString}`);
       }
 
       // Generate preview for conversation list
@@ -2141,44 +1660,24 @@ function FPChatApp({
 
       // Note: Log is already added above with serverMsgId if available from send response
 
-      // Update conversation with last message - normalize conversation ID matching
-      // Normalize: try both with and without user_ prefix
-      const normalizedPeerId = peerId.startsWith("user_")
-        ? peerId
-        : `user_${peerId}`;
-      const normalizedPeerIdWithoutPrefix = peerId.startsWith("user_")
-        ? peerId.replace("user_", "")
-        : peerId;
-
-
       setConversations((prev) => {
-        // Find conversation by matching either format
-        const existing = prev.find(
-          (c) =>
-            c.id === peerId ||
-            c.id === normalizedPeerId ||
-            c.id === normalizedPeerIdWithoutPrefix ||
-            c.id === `user_${normalizedPeerIdWithoutPrefix}`
+        const existing = findContactForOutgoingListUpdate(
+          prev,
+          memberListId,
+          groupId
         );
-
-
-        if (existing) {
-          // Use the existing conversation ID format
-          const conversationId = existing.id;
-          const updated = prev.map((conv) =>
-            conv.id === conversationId
-              ? {
-                  ...conv,
-                  lastMessage: preview,
-                  timestamp: new Date(),
-                  lastMessageFrom: userId, // Current user sent the last message
-                }
-              : conv
-          );
-          return updated;
-        }
-        // If conversation doesn't exist, create it (shouldn't happen, but handle gracefully)
-        return prev;
+        if (!existing) return prev;
+        const conversationId = existing.id;
+        return prev.map((conv) =>
+          conv.id === conversationId
+            ? {
+                ...conv,
+                lastMessage: preview,
+                timestamp: new Date(),
+                lastMessageFrom: userId,
+              }
+            : conv
+        );
       });
 
       // Force a small delay to ensure state update propagates
@@ -2233,11 +1732,9 @@ function FPChatApp({
     );
   }
 
-  // Determine if chat interface should show loading state
-  // Only show loading when actively generating token
-  // Allow chat to show even if not fully logged in (messages can be fetched from API)
-  // The login will happen in the background via the useEffect
-  const isChatConnecting = isGeneratingToken;
+  // After getDietitianToken: wait for Agora login (onConnected) before showing the chat UI
+  const isChatConnecting =
+    !!selectedContact && !!token && !isLoggedIn && !activeCall;
 
   return (
     <div className="app-container">
@@ -2267,15 +1764,16 @@ function FPChatApp({
             isMobileView && !showChatOnMobile ? "mobile-hidden" : ""
           }`}
         >
-          {selectedContact ? (
+          {isFetchingDietitianToken ? (
+            <div className="chat-loading-container">
+              <div className="chat-loading-spinner" />
+              <div className="chat-loading-text">Loading conversation…</div>
+            </div>
+          ) : selectedContact ? (
             isChatConnecting ? (
               <div className="chat-loading-container">
                 <div className="chat-loading-spinner" />
-                <div className="chat-loading-text">
-                  {isGeneratingToken
-                    ? "Generating token..."
-                    : "Connecting to chat..."}
-                </div>
+                <div className="chat-loading-text">Connecting to chat…</div>
               </div>
             ) : (
               <FPChatInterface
@@ -2296,6 +1794,7 @@ function FPChatApp({
                 onUpdateLastMessageFromHistory={updateLastMessageFromHistory}
                 coachInfo={coachInfo}
                 onSendProducts={handleSendProductSuggestions}
+                historyFetchEnabled={isLoggedIn}
               />
             )
           ) : (
@@ -2309,13 +1808,6 @@ function FPChatApp({
         </div>
         {/* User Details Panel */}
         <div ref={userDetailsPanelRef} className="user-details-panel-wrapper">
-          {/* <FPUserDetails
-            selectedContact={selectedContact}
-            userId={userId}
-            peerId={peerId}
-            onSend={handleSendMessage}
-            addLog={addLog}
-          /> */}
         </div>
       </div>
     </div>
@@ -2323,21 +1815,3 @@ function FPChatApp({
 }
 
 export default FPChatApp;
-
-/*
- for presence:
-  const Presenceoptions = {
-        description: "in_call",
-        userId: 444,
-      };
-
-      clientRef.current
-        .publishPresence(Presenceoptions)
-        .then((res) => {
-          console.log("prseence msg sent");
-          console.log(res);
-        })
-        .catch((e) => {
-          console.log("err: ", e);
-        });
-*/

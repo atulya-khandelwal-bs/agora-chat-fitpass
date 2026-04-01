@@ -8,13 +8,33 @@ export interface Contact {
   lastMessage?: string | object;
   timestamp?: Date | null;
   lastMessageFrom?: string | null;
-  conversationId?: string;
+  /** Agora group / conversation id from list API; null/undefined if the group is not created yet */
+  conversationId?: string | null;
+  /** Resolved group id after getDietitianToken (same as active Agora group) */
+  groupId?: string | null;
+  isGroupConversation?: boolean | null;
+  participantIds?: number[];
   messageCount?: number;
   unreadCount?: number;
   filterState?: string;
   description?: string;
   replyCount?: number;
   createdAt?: string | Date; // Chat initiation date/time
+}
+
+/**
+ * Incoming Agora chat SDK message shape (handlers, logging).
+ * Compatible with agora-chat payloads; index allows v2:customExts and other SDK fields.
+ */
+export interface MessageBody {
+  from?: string;
+  chatType?: string;
+  to?: string;
+  type?: string;
+  msg?: string;
+  body?: string | object;
+  ext?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 export interface Message {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, RefObject } from "react";
 import { createChatClient } from "../services/chatClient";
-import type { Connection, MessageBody } from "agora-chat";
+import type { Connection } from "agora-chat";
+import type { MessageBody } from "../../common/types/chat";
 
 interface MessageHandlers {
   onConnected?: () => void;
