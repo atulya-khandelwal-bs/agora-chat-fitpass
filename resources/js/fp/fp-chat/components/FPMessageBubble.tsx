@@ -121,6 +121,7 @@ export default function FPMessageBubble({
         <FPProductMessageView
           products={msg.products}
           formatCurrency={formatCurrency}
+          isIncoming={msg.isIncoming}
         />
       );
     }
