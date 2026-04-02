@@ -3,14 +3,20 @@ import React from "react";
 interface FPProductMessageViewProps {
   products: Product[];
   formatCurrency: (amount: number) => string;
+  /** Bubble alignment context (optional; reserved for layout tweaks). */
+  isIncoming?: boolean;
 }
 
 export default function FPProductMessageView({
   products,
   formatCurrency,
+  isIncoming = false,
 }: FPProductMessageViewProps): React.JSX.Element | null {
   return (
-    <div className="fp-product-message">
+    <div
+      className="fp-product-message"
+      data-direction={isIncoming ? "incoming" : "outgoing"}
+    >
       {/* Horizontal scrollable product cards */}
       <div className="fp-product-scroll">
         {products.map((p, index) => {
