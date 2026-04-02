@@ -12,10 +12,14 @@ export default function FPProductMessageView({
   formatCurrency,
   isIncoming = false,
 }: FPProductMessageViewProps): React.JSX.Element | null {
+  const bubbleDirection: "incoming" | "outgoing" = isIncoming
+    ? "incoming"
+    : "outgoing";
+
   return (
     <div
-      className="fp-product-message"
-      data-direction={isIncoming ? "incoming" : "outgoing"}
+      className={`fp-product-message fp-product-message--${bubbleDirection}`}
+      data-direction={bubbleDirection}
     >
       {/* Horizontal scrollable product cards */}
       <div className="fp-product-scroll">
