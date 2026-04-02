@@ -11,9 +11,11 @@ const props = defineProps({
   },
 });
 
-// Default to coach id 4 when available
+// Default to dietitian (id 333) when available, else coach id 4
 const selectedCoachId = ref('');
-if (props.healthCoaches?.some((c) => c.id === '4')) {
+if (props.healthCoaches?.some((c) => c.id === '333')) {
+  selectedCoachId.value = '333';
+} else if (props.healthCoaches?.some((c) => c.id === '4')) {
   selectedCoachId.value = '4';
 }
 
@@ -109,13 +111,23 @@ onBeforeUnmount(() => {
 .chat-panel {
   flex: 1;
   display: flex;
+  flex-direction: column;
   min-height: 0;
+  overflow: hidden;
+}
+
+/* React mounts inside this shell — must flex-grow so height: % resolves for the scaled inner wrapper */
+.chat-panel :deep(.fp-chat-wrapper-container) {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .chat-panel :deep(.fp-chat-wrapper) {
-  flex: 1;
-  height: 100%;
-  min-height: 100%;
+  min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 

@@ -1,0 +1,37 @@
+# Minimal Laravel + Vite image for Render (free tier / dev testing).
+# Render: New Web Service → Docker → set Dockerfile path to Dockerfile.render
+# Required env: APP_KEY, APP_URL (https://your-service.onrender.com)
+# Minimal DB: DB_CONNECTION=sqlite, DB_DATABASE=/var/www/html/database/database.sqlite
+
+FROM php:8.2-cli-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl unzip libpng-dev libonig-dev libxml2-dev libzip-dev \
+    libpq-dev \
+    && docker-php-ext-install pdo_mysql pdo_pgsql pdo_sqlite mbstring exif pcntl bcmath gd zip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+WORKDIR /var/www/html
+
+COPY . .
+
+RUN composer install --no-dev --optimize-autoloader --no-interaction
+
+# package-lock.json may be gitignored; npm install works without it
+RUN npm install && npm run build
+
+RUN mkdir -p storage/framework/{sessions,views,cache} storage/logs bootstrap/cache \
+    && touch database/database.sqlite \
+    && chmod -R 775 storage bootstrap/cache database
+
+ENV PORT=10000
+EXPOSE 10000
+
+# Env vars come from Render at runtime (no .env file required if all are set in dashboard).
+CMD sh -c "php artisan migrate --force && php artisan config:cache && php artisan serve --host=0.0.0.0 --port=${PORT}"

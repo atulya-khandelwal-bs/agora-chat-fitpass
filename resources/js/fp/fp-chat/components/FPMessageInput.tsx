@@ -189,7 +189,8 @@ export default function FPMessageInput({
                 : ""
             }
             onChange={(e) => {
-              if (e.nativeEvent.isComposing) return; // avoid double insert for typed emoji (IME)
+              const ne = e.nativeEvent;
+              if (ne instanceof InputEvent && ne.isComposing) return; // avoid double insert for typed emoji (IME)
               const text = e.target.value;
               if (draftAttachment) {
                 try {

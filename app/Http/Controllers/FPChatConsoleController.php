@@ -39,14 +39,17 @@ class FPChatConsoleController extends Controller
     {
         $request->validate([
             'from' => 'required|string',
-            'to' => 'required|string',
+            'groupId' => 'required|string',
+            'targetUserId' => 'required|string',
+            'receiverId' => 'required|string',
+            'isFromUser' => 'required|boolean',
             'type' => 'required|string',
             'data' => 'required|array',
         ]);
 
         try {
             $response = Http::post(
-                $this->backendUrl() . '/agora-chat/api/chat/send-custom-message',
+                $this->backendUrl() . '/api/chat/send-custom-message-to-group',
                 $request->all()
             );
 
@@ -71,7 +74,7 @@ class FPChatConsoleController extends Controller
 
         try {
             $response = Http::asJson()->post(
-                $this->backendUrl() . '/agora-chat/api/chat/generate-token',
+                $this->backendUrl() . '/api/chat/generate-token',
                 $request->only(['username', 'expireInSecs'])
             );
             return response()->json($response->json(), $response->status());
@@ -94,13 +97,64 @@ class FPChatConsoleController extends Controller
 
         try {
             $response = Http::asJson()->post(
-                $this->backendUrl() . '/agora-chat/api/chat/register-user',
+                $this->backendUrl() . '/api/chat/register-user',
                 $request->only('username')
             );
             return response()->json($response->json(), $response->status());
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 'User registration failed',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Proxy dietitian + group chat token to external API.
+     */
+    public function getDietitianToken(Request $request)
+    {
+        $request->validate([
+            'user_id' => 'required|integer',
+            'dietitian_id' => 'required|integer',
+            'group_id' => 'nullable',
+        ]);
+
+        try {
+            $response = Http::asJson()->post(
+                $this->backendUrl() . '/api/chat/getDietitianToken',
+                $request->only(['user_id', 'dietitian_id', 'group_id'])
+            );
+
+            return response()->json($response->json(), $response->status());
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to get dietitian token',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Proxy update-text-message to FitPass backend (fitpass_chat_messages2.message_id + body).
+     */
+    public function updateTextMessage(Request $request)
+    {
+        $request->validate([
+            'messageId' => 'required|string',
+            'text' => 'required|string',
+        ]);
+
+        try {
+            $response = Http::asJson()->post(
+                $this->backendUrl() . '/api/chat/update-text-message',
+                $request->only(['messageId', 'text'])
+            );
+
+            return response()->json($response->json(), $response->status());
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to update text message',
                 'message' => $e->getMessage(),
             ], 500);
         }

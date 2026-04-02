@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { flushSync } from "react-dom";
-import config from "../../common/config.ts";
+import config from "../../common/config";
 import FPChatHeader from "./FPChatHeader";
 import FPChatTab from "./FPChatTab";
 import FPInfoTab from "./FPInfoTab";
@@ -19,18 +19,18 @@ import {
   convertApiMessageToFormat,
   parseSystemPayload,
   getSystemLabel,
-} from "../utils/messageFormatters.ts";
+} from "../utils/messageFormatters";
 import {
   mergeAndSortMessages,
   deduplicateAndSort,
-} from "../utils/messageMerge.ts";
-import { normalizeRecordingPlaybackUrl } from "../utils/recordingUrl.ts";
-import { editMessage } from "../utils/messageEditor.ts";
+} from "../utils/messageMerge";
+import { normalizeRecordingPlaybackUrl } from "../utils/recordingUrl";
+import { editMessage } from "../utils/messageEditor";
 import {
   postJsonExternal,
   putBlobExternal,
   type PresignResponse,
-} from "../utils/externalUpload.ts";
+} from "../utils/externalUpload";
 
 // Import types from messageFormatters
 interface AgoraMessage {
@@ -185,7 +185,7 @@ export default function FPChatInterface({
   const [recordingDuration, setRecordingDuration] = useState<number>(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const recordingStartTimeRef = useRef<number | null>(null); // Track when recording started
   const recordingDurationRef = useRef<number>(0); // Track duration in a ref for accurate reading
@@ -2088,8 +2088,7 @@ export default function FPChatInterface({
     }
   };
 
-  // Demo message samples for testing
-  // @ts-expect-error - Demo function for testing, may be used in future
+  // Demo message samples for testing (reserved for future use)
   const _sendDemoMessage = (type: string): void => {
     if (!peerId) return;
 

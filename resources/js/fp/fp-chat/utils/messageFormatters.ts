@@ -1,5 +1,5 @@
-import config from "../../common/config.ts";
-import { normalizeRecordingPlaybackUrl } from "./recordingUrl.ts";
+import config from "../../common/config";
+import { normalizeRecordingPlaybackUrl } from "./recordingUrl";
 import {
   Contact,
   Message,

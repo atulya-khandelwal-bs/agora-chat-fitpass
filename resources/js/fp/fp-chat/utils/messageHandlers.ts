@@ -3,7 +3,7 @@
  * Handles incoming text messages, custom messages, and connection events
  */
 
-import config from "../../common/config.ts";
+import config from "../../common/config";
 import { Contact, LogEntry, type MessageBody } from "../../common/types/chat";
 import React from "react";
 import { isBlockedUID } from "./blockedUIDs";

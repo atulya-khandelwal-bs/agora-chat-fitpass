@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { SlidersHorizontal } from "lucide-react";
 import { ArrowUpDown } from "lucide-react";
 import { Search } from "lucide-react";
-import config from "../../common/config.ts";
+import config from "../../common/config";
 import { Contact } from "../../common/types/chat";
 import { formatTextWithTags } from "../utils/textFormatter";
 import React from "react";

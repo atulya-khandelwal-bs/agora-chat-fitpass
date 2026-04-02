@@ -158,22 +158,30 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* ~67% browser-zoom density at 100% zoom: logical size is inflated then scaled down */
 .fp-chat-wrapper-container {
   width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .fp-chat-wrapper {
-  width: 100%;
-  height: 100%;
-  min-height: 600px;
+  --fp-ui-scale: 0.67;
+  transform: scale(var(--fp-ui-scale));
+  transform-origin: top left;
+  width: calc(100% / var(--fp-ui-scale));
+  height: calc(100% / var(--fp-ui-scale));
+  flex-shrink: 0;
   background: #0b111f;
 }
 
 .fp-chat-loading {
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  height: 100%;
-  min-height: 600px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -182,9 +190,9 @@ onBeforeUnmount(() => {
 }
 
 .fp-chat-error {
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  height: 100%;
-  min-height: 600px;
   display: flex;
   align-items: center;
   justify-content: center;

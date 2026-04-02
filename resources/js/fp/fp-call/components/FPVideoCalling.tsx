@@ -1,10 +1,10 @@
-import React from "react";
+import * as React from "react";
 import AgoraRTC, {
   AgoraRTCProvider,
   IAgoraRTCClient,
   type ILocalTrack,
 } from "agora-rtc-react";
-import FPCallUI from "./FPCallUI.tsx";
+import FPCallUI from "./FPCallUI";
 import VirtualBackgroundExtension from "agora-extension-virtual-background";
 import {
   useIsConnected,
@@ -15,7 +15,7 @@ import {
   useRemoteUsers,
 } from "agora-rtc-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import config from "../../common/config.ts";
+import config from "../../common/config";
 import { FPVideoCallingProps, BackgroundOption } from "../../common/types/call";
 import { shouldProceedWithRemoteUsers } from "../../fp-chat/utils/blockedUIDs";
 
@@ -95,7 +95,7 @@ const FPVideoCallingInner = ({
   const [mainUserId, setMainUserId] = useState<number | null>(null);
 
   // Refs
-  const hideControlsTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoContainerRef = useRef<HTMLDivElement | null>(null);
   const callStartTimeRef = useRef<number | null>(null);
   const remoteUserEverJoinedRef = useRef<boolean>(false);
@@ -993,7 +993,7 @@ const FPVideoCallingInner = ({
     const timeoutId2 = setTimeout(configureMicrophoneTrack, 200);
 
     // Listen for track state changes
-    let trackStateCheckInterval: NodeJS.Timeout | null = null;
+    let trackStateCheckInterval: ReturnType<typeof setInterval> | null = null;
     if (isConnected && calling) {
       trackStateCheckInterval = setInterval(() => {
         if (localMicrophoneTrack && micOn) {

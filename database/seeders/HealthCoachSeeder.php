@@ -9,6 +9,15 @@ class HealthCoachSeeder extends Seeder
 {
     public function run(): void
     {
+        DB::table('fitpass_health_coach')->updateOrInsert(
+            ['health_coach_id' => 333],
+            [
+                'health_coach_name' => 'Dietitian',
+                'status' => 2,
+                'specialist' => 'Dietitian',
+            ]
+        );
+
         // Ensure coach id 4 exists (status 2 = active)
         if (DB::table('fitpass_health_coach')->where('health_coach_id', 4)->exists()) {
             DB::table('fitpass_health_coach')->where('health_coach_id', 4)->update([

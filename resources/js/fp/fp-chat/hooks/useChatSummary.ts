@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import type { Connection } from "agora-chat";
 import axios from "axios";
-import config from "../../common/config.ts"; // Currently using hardcoded URLs
+import config from "../../common/config"; // Currently using hardcoded URLs
 
 export interface Summary {
   summary_id: number;

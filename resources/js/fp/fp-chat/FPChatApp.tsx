@@ -1,19 +1,19 @@
 import React, { useEffect, useState, useRef } from "react";
 import "./FPChatApp.css";
-import FPConversationList from "./components/FPConversationList.tsx";
-import FPChatInterface from "./components/FPChatInterface.tsx";
-import FPRecordingPlayerPage from "./components/FPRecordingPlayerPage.tsx";
-import FPUserDetails from "./components/FPUserDetails.tsx";
-import FPCallApp from "../fp-call/FPCallApp.tsx";
+import FPConversationList from "./components/FPConversationList";
+import FPChatInterface from "./components/FPChatInterface";
+import FPRecordingPlayerPage from "./components/FPRecordingPlayerPage";
+import FPUserDetails from "./components/FPUserDetails";
+import FPCallApp from "../fp-call/FPCallApp";
 import AgoraChat from "agora-chat";
-import { useChatClient } from "./hooks/useChatClient.ts";
-import config from "../common/config.ts";
-import { buildCustomExts } from "./utils/buildCustomExts.ts";
-import { createMessageHandlers } from "./utils/messageHandlers.ts";
+import { useChatClient } from "./hooks/useChatClient";
+import config from "../common/config";
+import { buildCustomExts } from "./utils/buildCustomExts";
+import { createMessageHandlers } from "./utils/messageHandlers";
 import {
   findContactForHistoryPeer,
   findContactForOutgoingListUpdate,
-} from "./utils/conversationListMatch.ts";
+} from "./utils/conversationListMatch";
 import {
   Contact,
   Message,
@@ -1074,8 +1074,7 @@ function FPChatApp({
     addLog(`Initiating ${callType} call with ${customerId}`);
   };
 
-  // Handle accept call
-  // @ts-expect-error - May be used in future for incoming call handling
+  // Handle accept call (reserved for incoming-call flow)
   const _handleAcceptCall = (): void => {
     if (!incomingCall) return;
 
@@ -1099,8 +1098,7 @@ function FPChatApp({
   };
 
 
-  // Handle reject call
-  // @ts-expect-error - May be used in future for incoming call handling
+  // Handle reject call (reserved for incoming-call flow)
   const _handleRejectCall = (): void => {
     setIncomingCall(null);
   };
