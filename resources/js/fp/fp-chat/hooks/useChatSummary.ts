@@ -16,14 +16,14 @@ export interface Summary {
 
 interface UseChatSummaryOptions {
   chatClient: Connection | null; // Kept for API compatibility but not used
-  peerId: string | null;
+  group_id: string | null;
   userId: string;
   enabled?: boolean;
 }
 
 export function useChatSummary({
   chatClient: _chatClient, // Unused but kept for API compatibility
-  peerId,
+  group_id,
   userId: _userId, // Unused but kept for API compatibility
   enabled: _enabled, // Unused but kept for API compatibility
 }: UseChatSummaryOptions): {
@@ -42,10 +42,10 @@ export function useChatSummary({
 
   // Get conversation ID from peerId
   const getConversationId = useCallback((): string | null => {
-    if (!peerId) return null;
+    if (!group_id) return null;
     // Normalize: ensure it has user_ prefix
-    return peerId.startsWith("user_") ? peerId : `user_${peerId}`;
-  }, [peerId]);
+    return group_id;
+  }, [group_id]);
 
   // Fetch summaries from API
   const fetchSummaries = useCallback(

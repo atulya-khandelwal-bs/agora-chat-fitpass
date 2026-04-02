@@ -24,9 +24,14 @@ export default function FPVideoPlayer({
     setIsLoading(true);
     setError(null);
 
-    // Initialize HLS player
-    const hls = initializeHlsPlayer(videoElement, videoUrl);
-    hlsRef.current = hls;
+    let hls: ReturnType<typeof initializeHlsPlayer> = null;
+    if (videoUrl.includes(".m3u8")) {
+      hls = initializeHlsPlayer(videoElement, videoUrl);
+      hlsRef.current = hls;
+    } else {
+      videoElement.src = videoUrl;
+      hlsRef.current = null;
+    }
 
     // Handle video events
     const handleLoadedData = (): void => {
@@ -52,6 +57,8 @@ export default function FPVideoPlayer({
       videoElement.removeEventListener("error", handleError);
       videoElement.removeEventListener("canplay", handleCanPlay);
       cleanupHlsPlayer(hls);
+      videoElement.removeAttribute("src");
+      videoElement.load();
     };
   }, [videoUrl]);
 

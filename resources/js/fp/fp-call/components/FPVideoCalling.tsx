@@ -1,5 +1,9 @@
 import React from "react";
-import AgoraRTC, { AgoraRTCProvider, IAgoraRTCClient } from "agora-rtc-react";
+import AgoraRTC, {
+  AgoraRTCProvider,
+  IAgoraRTCClient,
+  type ILocalTrack,
+} from "agora-rtc-react";
 import FPCallUI from "./FPCallUI.tsx";
 import VirtualBackgroundExtension from "agora-extension-virtual-background";
 import {
@@ -10,7 +14,7 @@ import {
   usePublish,
   useRemoteUsers,
 } from "agora-rtc-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import config from "../../common/config.ts";
 import { FPVideoCallingProps, BackgroundOption } from "../../common/types/call";
 import { shouldProceedWithRemoteUsers } from "../../fp-chat/utils/blockedUIDs";
@@ -114,9 +118,9 @@ const FPVideoCallingInner = ({
   // CRITICAL: Only create tracks when call is active (calling=true)
   // This prevents tracks from being created after call ends
   const { localMicrophoneTrack } = useLocalMicrophoneTrack(calling);
-  const { localCameraTrack } = useLocalCameraTrack(
-    calling && cameraOn && !isAudioCall
-  );
+  // Keep one camera track for the whole video call (same as mic hook: it only creates once
+  // and never clears when `ready` goes false). Toggling video uses unpublish + setEnabled.
+  const { localCameraTrack } = useLocalCameraTrack(calling && !isAudioCall);
   const allRemoteUsers = useRemoteUsers();
 
   // Helper function to stop MediaStreamTrack (system device)
@@ -797,7 +801,7 @@ const FPVideoCallingInner = ({
       appid: appId,
       channel,
       token: token || null,
-      uid: typeof uid === "number" ? uid : undefined,
+      uid: String(uid),
     },
     calling
   );
@@ -813,17 +817,60 @@ const FPVideoCallingInner = ({
     if (isAudioCall) {
       return localMicrophoneTrack ? [localMicrophoneTrack] : [];
     }
-    return [localMicrophoneTrack, localCameraTrack].filter(
-      (track) => track !== null
-    );
+    const list: ILocalTrack[] = [];
+    if (localMicrophoneTrack) {
+      list.push(localMicrophoneTrack);
+    }
+    // usePublish does not unpublish tracks removed from this array — we unpublish in an effect.
+    if (cameraOn && localCameraTrack) {
+      list.push(localCameraTrack);
+    }
+    return list;
   }, [
     isAudioCall,
     localMicrophoneTrack,
     localCameraTrack,
+    cameraOn,
     calling,
     isConnected,
   ]);
   usePublish(tracksToPublish);
+
+  // agora-rtc-react usePublish never unpublishes a track that disappears from the list;
+  // remote users would keep seeing the last frame unless we unpublish explicitly.
+  useEffect(() => {
+    if (isAudioCall || !calling || !isConnected || !localCameraTrack || cameraOn) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        await _client.unpublish([localCameraTrack]);
+      } catch (err) {
+        if (!cancelled) {
+          console.warn("Failed to unpublish local video:", err);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    _client,
+    isAudioCall,
+    calling,
+    isConnected,
+    cameraOn,
+    localCameraTrack,
+  ]);
+
+  // Run before usePublish's useEffect so the track is enabled when we (re)publish video.
+  useLayoutEffect(() => {
+    if (!localCameraTrack || isAudioCall) return;
+    if (typeof localCameraTrack.setEnabled === "function") {
+      localCameraTrack.setEnabled(cameraOn);
+    }
+  }, [localCameraTrack, isAudioCall, cameraOn]);
 
   // Ensure microphone track is enabled and unmuted when published (critical for remote users to hear audio)
   useEffect(() => {
@@ -996,9 +1043,8 @@ const FPVideoCallingInner = ({
         },
         body: JSON.stringify({
           channelName: channel,
-          uid: uid,
-          expireSecs: 3600,
-          role: "publisher",
+          username: String(userId || uid),
+          expireInSecs: 7200,
         }),
       });
 
@@ -1230,7 +1276,7 @@ const FPVideoCallingInner = ({
   };
 
   return (
-    <div>
+    <div className="fp-video-calling-shell">
       <FPCallUI
         // Connection state
         isConnected={isConnected}

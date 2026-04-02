@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import "./FPChatApp.css";
 import FPConversationList from "./components/FPConversationList.tsx";
 import FPChatInterface from "./components/FPChatInterface.tsx";
+import FPRecordingPlayerPage from "./components/FPRecordingPlayerPage.tsx";
 import FPUserDetails from "./components/FPUserDetails.tsx";
 import FPCallApp from "../fp-call/FPCallApp.tsx";
 import AgoraChat from "agora-chat";
@@ -335,6 +336,15 @@ function FPChatApp({
       return;
     }
 
+    const memberListId = selectedContact?.id
+      ? String(selectedContact.id)
+      : "";
+    const patientId = (memberListId || peerId || "").trim();
+    if (!patientId) {
+      addLog("No patient id for product suggestions (targetUserId / receiverId).");
+      return;
+    }
+
     try {
       if (isSendingProducts) {
         return;
@@ -367,10 +377,14 @@ function FPChatApp({
 
       const body = {
         from: userId,
-        to: productTargetGroupId,
+        groupId: productTargetGroupId,
+        targetUserId: patientId,
+        receiverId: patientId,
+        isFromUser: false,
         type: "recommended_products",
         data: payload,
       };
+
 
       await axios.post(config.api.customMessage, body);
     } catch (error) {
@@ -1034,7 +1048,7 @@ function FPChatApp({
 
     // Channel: customer (member) id + dietitian (coach) id — not the Agora group id
     const callTypeStr = callType === "video" ? "video" : "voice";
-    const channel = `fp_rtc_call_${callTypeStr}_${customerId}_${userId}`;
+    const channel = `fp_rtc_call_${callTypeStr}_${customerId}_${userId}_group`;
 
     // Reset call end message sent flag for new call
     callEndMessageSentRef.current = false;
@@ -1223,7 +1237,8 @@ function FPChatApp({
   // Function to update conversation's last message from history
   const updateLastMessageFromHistory = (
     peerId: string,
-    formattedMsg: Message
+    formattedMsg: Message,
+    options?: { editOfLatest?: boolean }
   ): void => {
     if (!peerId || !formattedMsg) return;
 
@@ -1251,14 +1266,15 @@ function FPChatApp({
         const conversationId = existing.id;
 
         // Only update if history message is more recent than existing last message
-        // or if there's no existing last message
+        // or if there's no existing last message; edits of the latest thread message
+        // force refresh so the list preview text stays in sync with Agora/backend.
         const existingTimestamp = existing.timestamp
           ? new Date(existing.timestamp)
           : null;
         const shouldUpdate =
+          options?.editOfLatest === true ||
           !existingTimestamp ||
           timestamp.getTime() >= existingTimestamp.getTime();
-
 
         if (shouldUpdate) {
           const updated = prev.map((conv) => {
@@ -1342,44 +1358,54 @@ function FPChatApp({
 
       // If Agora is not ready, try sending via API as fallback
       if (!isAgoraReady) {
-        
-        // Prepare message for API
-        // Handle both string and object messages
-        let apiBody: { from: string; to: string; type: string; data?: unknown } = {
-          from: userId,
-          to: groupId,
-          type: "text",
-        };
+        const patientId = (memberListId || peerId || "").trim();
+        if (!patientId) {
+          addLog("No patient id for API send (targetUserId / receiverId)");
+          setMessage(
+            typeof messageToSend === "string"
+              ? messageToSend
+              : JSON.stringify(messageToSend as object)
+          );
+          isSendingRef.current = false;
+          return;
+        }
+
+        // Prepare message for API (shape matches /api/chat/send-custom-message-to-group)
+        let apiType = "text";
+        let apiData: unknown;
 
         if (typeof messageToSend === "string") {
-          // Try to parse as JSON to check if it's a custom message
           try {
             const parsed = JSON.parse(messageToSend);
             if (parsed && typeof parsed === "object" && parsed.type) {
-              // Custom message - use the parsed type and data
-              apiBody.type = parsed.type;
-              apiBody.data = parsed;
+              apiType = parsed.type;
+              apiData = parsed;
             } else {
-              // Plain text message - use text type with message in data
-              apiBody.type = "text";
-              apiBody.data = {
+              apiData = {
                 message: messageToSend,
                 type: "text",
               };
             }
           } catch {
-            // Plain text message - not JSON
-            apiBody.type = "text";
-            apiBody.data = {
+            apiData = {
               message: messageToSend,
               type: "text",
             };
           }
         } else {
-          // Object message - treat as custom
-          apiBody.type = (messageToSend as { type?: string }).type || "text";
-          apiBody.data = messageToSend;
+          apiType = (messageToSend as { type?: string }).type || "text";
+          apiData = messageToSend;
         }
+
+        const apiBody = {
+          from: userId,
+          groupId,
+          targetUserId: patientId,
+          receiverId: patientId,
+          isFromUser: false,
+          type: apiType,
+          data: apiData,
+        };
 
         try {
           const response = await fetch(config.api.customMessage, {
@@ -1481,13 +1507,14 @@ function FPChatApp({
         }
       }
 
-      // Prepare ext properties with sender info (patient / member user id for group context)
+      // Prepare ext properties with sender info; receiverId = web panel patient id (same as targetUserId)
       const ALWAYS_SEND_PATIENT_ID = memberListId;
       const extProperties = {
         senderName: coachInfo.coachName || userId,
         senderProfile: coachInfo.profilePhoto || config.defaults.avatar,
         isFromUser: false,
         targetUserId: ALWAYS_SEND_PATIENT_ID,
+        receiverId: ALWAYS_SEND_PATIENT_ID,
       };
 
       let options: {
@@ -1710,6 +1737,33 @@ function FPChatApp({
   // Note: layout measurement & debug effect removed to avoid hook/runtime issues during calls.
   // If needed later, reintroduce a minimal, side-effect-safe layout hook.
   // #endregion
+
+  // Dedicated recording tab: ?url=…&type=video_call|voice_call (legacy window.open links)
+  const recordingPlaybackFromQuery =
+    typeof window !== "undefined" &&
+    (() => {
+      const p = new URLSearchParams(window.location.search);
+      const raw = p.get("url");
+      if (!raw?.trim()) return false;
+      const t = p.get("type");
+      if (
+        t != null &&
+        t !== "" &&
+        t !== "video_call" &&
+        t !== "voice_call"
+      ) {
+        return false;
+      }
+      return true;
+    })();
+
+  if (recordingPlaybackFromQuery) {
+    return (
+      <div className="app-container">
+        <FPRecordingPlayerPage />
+      </div>
+    );
+  }
 
   // Show call interface if there's an active call
   if (activeCall) {

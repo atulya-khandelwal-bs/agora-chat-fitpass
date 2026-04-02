@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { initializeHlsPlayer, cleanupHlsPlayer } from "../utils/hlsPlayer";
+import { normalizeRecordingPlaybackUrl } from "../utils/recordingUrl.ts";
 import Hls from "hls.js";
 
 /**
@@ -29,7 +30,7 @@ export default function FPRecordingPlayerPage(): React.JSX.Element {
       return;
     }
 
-    setRecordingUrl(url);
+    setRecordingUrl(normalizeRecordingPlaybackUrl(url));
     setCallType(type || "video_call"); // Default to video_call if not specified
   }, []);
 

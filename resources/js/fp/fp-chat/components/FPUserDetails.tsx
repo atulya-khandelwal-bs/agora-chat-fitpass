@@ -19,6 +19,39 @@ export default function FPUserDetails({
 }: FPUserDetailsProps): React.JSX.Element {
   const [productCount, setProductCount] = useState<number>(3); // Default to 3 products
 
+  /** Payload shape for Laravel proxy → /api/chat/send-custom-message-to-group */
+  const buildCustomMessageBody = (
+    type: string,
+    data: Record<string, unknown>
+  ): {
+    from: string;
+    groupId: string;
+    targetUserId: string;
+    receiverId: string;
+    isFromUser: boolean;
+    type: string;
+    data: Record<string, unknown>;
+  } | null => {
+    if (!peerId || !userId) return null;
+    const groupIdForApi = String(
+      selectedContact?.groupId ??
+        selectedContact?.conversationId ??
+        peerId ??
+        ""
+    ).trim();
+    const patientId = String(selectedContact?.id ?? peerId).trim();
+    if (!groupIdForApi || !patientId) return null;
+    return {
+      from: userId,
+      groupId: groupIdForApi,
+      targetUserId: patientId,
+      receiverId: patientId,
+      isFromUser: false,
+      type,
+      data,
+    };
+  };
+
   // All available products for suggestions
   const allProducts: Product[] = [
     {
@@ -139,12 +172,11 @@ export default function FPUserDetails({
         ],
       };
 
-      const body = {
-        from: userId,
-        to: peerId,
-        type: "meal_plan_update",
-        data: payload,
-      };
+      const body = buildCustomMessageBody("meal_plan_update", payload);
+      if (!body) {
+        console.error("Missing group or patient id for meal plan message");
+        return;
+      }
 
       try {
         const response = await axios.post(config.api.customMessage, body);
@@ -200,12 +232,14 @@ export default function FPUserDetails({
         ],
       };
 
-      const coachAssignedBody = {
-        from: userId,
-        to: peerId,
-        type: "coach_assigned",
-        data: coachAssignedPayload,
-      };
+      const coachAssignedBody = buildCustomMessageBody(
+        "coach_assigned",
+        coachAssignedPayload as unknown as Record<string, unknown>
+      );
+      if (!coachAssignedBody) {
+        console.error("Missing group or patient id for coach_assigned");
+        return;
+      }
 
       // Second: Send coach_details with actual coach information
       const coachDetailsPayload = {
@@ -226,12 +260,14 @@ export default function FPUserDetails({
         ],
       };
 
-      const coachDetailsBody = {
-        from: userId,
-        to: peerId,
-        type: "coach_details",
-        data: coachDetailsPayload,
-      };
+      const coachDetailsBody = buildCustomMessageBody(
+        "coach_details",
+        coachDetailsPayload as unknown as Record<string, unknown>
+      );
+      if (!coachDetailsBody) {
+        console.error("Missing group or patient id for coach_details");
+        return;
+      }
 
       try {
         // Send coach_assigned message first
@@ -335,12 +371,11 @@ export default function FPUserDetails({
         product_list: productList,
       };
 
-      const body = {
-        from: userId,
-        to: peerId,
-        type: "recommended_products",
-        data: payload,
-      };
+      const body = buildCustomMessageBody("recommended_products", payload);
+      if (!body) {
+        console.error("Missing group or patient id for products message");
+        return;
+      }
 
       try {
         const response = await axios.post(config.api.customMessage, body);
@@ -425,12 +460,11 @@ export default function FPUserDetails({
         ],
       };
 
-      const body = {
-        from: userId,
-        to: peerId,
-        type: "general_notification",
-        data: payload,
-      };
+      const body = buildCustomMessageBody("general_notification", payload);
+      if (!body) {
+        console.error("Missing group or patient id for general notification");
+        return;
+      }
 
       try {
         const response = await axios.post(config.api.customMessage, body);
@@ -481,12 +515,11 @@ export default function FPUserDetails({
         },
         redirection_details: [],
       };
-      const body = {
-        from: userId,
-        to: peerId,
-        type: "documents",
-        data: payload,
-      };
+      const body = buildCustomMessageBody("documents", payload);
+      if (!body) {
+        console.error("Missing group or patient id for documents message");
+        return;
+      }
 
       try {
         const response = await axios.post(config.api.customMessage, body);

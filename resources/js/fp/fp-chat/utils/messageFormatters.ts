@@ -1,4 +1,5 @@
 import config from "../../common/config.ts";
+import { normalizeRecordingPlaybackUrl } from "./recordingUrl.ts";
 import {
   Contact,
   Message,
@@ -599,12 +600,22 @@ export const formatMessage = (
           }
         }
 
+        const normalizedCallDetails =
+          finalCallDetails?.call_url != null
+            ? {
+                ...finalCallDetails,
+                call_url: normalizeRecordingPlaybackUrl(
+                  String(finalCallDetails.call_url)
+                ),
+              }
+            : finalCallDetails;
+
         console.log("📞 [formatMessage] Processing call message:", {
           type,
           callPayload,
-          call_details: finalCallDetails,
-          call_url: finalCallDetails?.call_url,
-          hasCallDetails: !!finalCallDetails,
+          call_details: normalizedCallDetails,
+          call_url: normalizedCallDetails?.call_url,
+          hasCallDetails: !!normalizedCallDetails,
           fullPayload: callPayload,
         });
 
@@ -621,7 +632,7 @@ export const formatMessage = (
               title: callPayload.title,
               description: callPayload.description,
               icons_details: callPayload.icons_details,
-              call_details: finalCallDetails,
+              call_details: normalizedCallDetails,
               redirection_details: callPayload.redirection_details,
             } as SystemMessageData["payload"] & {
               title?: string;
@@ -1198,6 +1209,16 @@ export const formatMessage = (
             redirection_details?: MealPlanRedirectionDetail[];
           };
 
+          const normalizedCallDetailsFromApi =
+            callPayload.call_details?.call_url != null
+              ? {
+                  ...callPayload.call_details,
+                  call_url: normalizeRecordingPlaybackUrl(
+                    String(callPayload.call_details.call_url)
+                  ),
+                }
+              : callPayload.call_details;
+
           return {
             ...baseMessage,
             content:
@@ -1219,7 +1240,7 @@ export const formatMessage = (
                 title: callPayload.title,
                 description: callPayload.description,
                 icons_details: callPayload.icons_details,
-                call_details: callPayload.call_details,
+                call_details: normalizedCallDetailsFromApi,
                 redirection_details: callPayload.redirection_details,
               } as SystemMessageData["payload"] & {
                 title?: string;

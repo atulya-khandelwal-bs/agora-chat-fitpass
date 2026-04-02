@@ -1216,3 +1216,68 @@
 .fp-call-root button:focus {
   outline: none;
 }
+
+/* =============================================================================
+   Embedded in FP chat: viewport units (100vw/100vh) do not match the panel;
+   fill the scaled mount so video/voice calls do not leave empty bands.
+   ============================================================================= */
+.fp-chat-wrapper .fp-call-root {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fp-chat-wrapper .fp-call-root #root {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.fp-chat-wrapper .fp-call-root .fp-video-calling-shell {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.fp-chat-wrapper .fp-call-root .video-call-container {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  flex: 1;
+}
+
+.fp-chat-wrapper .fp-call-root .join-screen {
+  min-height: 0 !important;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-width: 768px) {
+  .fp-chat-wrapper .fp-call-root .video-grid.users-2 {
+    height: 100% !important;
+  }
+
+  .fp-chat-wrapper .fp-call-root .video-grid.users-2 .video-item.main-video,
+  .fp-chat-wrapper .fp-call-root .video-grid.users-2 .video-item.remote-main.main-video {
+    min-height: 0 !important;
+    height: 100% !important;
+  }
+
+  .fp-chat-wrapper .fp-call-root .video-grid.users-1 .video-item {
+    max-height: none !important;
+  }
+
+  .fp-chat-wrapper .fp-call-root .video-grid.users-2 .video-item.main-video {
+    min-height: 0 !important;
+  }
+}

@@ -28,6 +28,10 @@ interface Config {
     generateChatSummary: string;
     getChatSummaries: string;
     customMessage: string;
+    /** Laravel-proxied dietitian + group token (POST JSON: user_id, dietitian_id, group_id) */
+    getDietitianToken: string;
+    /** Laravel-proxied text edit sync (POST JSON: messageId, text) → FitPass DB */
+    updateTextMessage: string;
   };
   defaults: {
     avatar: string;
@@ -74,48 +78,56 @@ const config: Config = {
 
     // Specific API endpoints (constructed from base URL)
     get generateToken(): string {
-      return `${this.backend}/agora-chat/api/chat/generate-token`;
+      return `${this.backend}/api/chat/generate-token`;
     },
 
     get generatePresignUrl(): string {
-      return `${this.backend}/agora-chat/api/s3/generate-presign-url`;
+      return `${this.backend}/api/s3/generate-presign-url`;
     },
 
     get registerUserEndpoint(): string {
-      return `${this.backend}/agora-chat/api/chat/register-user`;
+      return `${this.backend}/api/chat/register-user`;
     },
 
     get fetchCoaches(): string {
-      // return `${this.backend}/agora-chat/api/fetch-coaches;
-      return `${this.backend}/agora-chat/api/demo/fetch-coaches`;
+      // return `${this.backend}/api/fetch-coaches;
+      return `${this.backend}/api/demo/fetch-coaches`;
     },
 
     get fetchConversations(): string {
-      return `${this.backend}/agora-chat/api/chat/fetch-conversations`;
-      // return `${this.backend}/agora-chat/api/fetch-conversations`;
+      return `${this.backend}/api/chat/fetch-conversations`;
+      // return `${this.backend}/api/fetch-conversations`;
     },
 
     get fetchMessages(): string {
-      return `${this.backend}/agora-chat/api/chat/fetch-messages`;
+      return `${this.backend}/api/chat/fetch-messages`;
     },
 
     get summary(): string {
-      return `${this.backend}/agora-chat/api/v1/summary`;
+      return `${this.backend}/api/v1/summary`;
     },
     get latestSummary(): string {
-      return `${this.backend}/agora-chat/api/v1/summaries/latest`;
+      return `${this.backend}/api/v1/summaries/latest`;
     },
     get generateChatSummary(): string {
-      return `${this.backend}/agora-chat/api/chat/generate-chat-summary`;
+      return `${this.backend}/api/chat/generate-chat-summary`;
     },
     get getChatSummaries(): string {
-      return `${this.backend}/agora-chat/api/chat/get-chat-summaries`;
+      return `${this.backend}/api/chat/get-chat-summaries`;
     },
 
     get customMessage(): string {
       // Use relative path to proxy through Laravel backend to avoid CORS issues
       // Laravel will proxy the request to the external API
-      return '/api/chat/send-custom-message';
+      return '/api/chat/send-custom-message-to-group';
+    },
+
+    get getDietitianToken(): string {
+      return '/api/chat/get-dietitian-token';
+    },
+
+    get updateTextMessage(): string {
+      return '/api/chat/update-text-message';
     },
   },
 
@@ -139,7 +151,7 @@ const config: Config = {
 
   // Chat Configuration
   chat: {
-    pageSize: 20, // Number of messages to fetch per page
+    pageSize: 50, // Number of messages to fetch per page
     // Multi-session support: true = allow multiple browsers, false = single session only
     // Set to true for development (allows same user logged in from multiple browsers)
     // Set to false for production (single session - new login kicks out previous)
@@ -149,7 +161,7 @@ const config: Config = {
   // RTC Token API (constructed from backend base URL)
   rtcToken: {
     get apiUrl(): string {
-      return `${config.api.backend}/agora-chat/api/rtc/generate-token`;
+      return `${config.api.backend}/api/rtc/generate-token`;
     },
   },
 };

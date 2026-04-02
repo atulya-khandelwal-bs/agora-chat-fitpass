@@ -6,18 +6,18 @@ import { useChatSummary } from "../hooks/useChatSummary";
 interface FPDescriptionTabProps {
   selectedContact: Contact | null;
   chatClient: Connection | null;
-  peerId: string | null;
+  group_id: string | null;
   userId: string;
 }
 
 export default function FPDescriptionTab({
   selectedContact,
   chatClient,
-  peerId,
+  group_id,
   userId,
 }: FPDescriptionTabProps): React.JSX.Element {
   const {
-    summaries,
+    summaries,  
     isLoading,
     error,
     generateSummary,
@@ -26,10 +26,12 @@ export default function FPDescriptionTab({
     clearStatusMessage,
   } = useChatSummary({
     chatClient,
-    peerId,
+    group_id,
     userId,
-    enabled: !!peerId && !!chatClient,
+    enabled: !!group_id && !!chatClient,
   });
+
+  console.log("group_id", group_id);
 
   const [showBanner, setShowBanner] = useState<boolean>(false);
   const [isDismissing, setIsDismissing] = useState<boolean>(false);
@@ -50,11 +52,11 @@ export default function FPDescriptionTab({
 
   // Automatically fetch summaries when tab is opened (component mounts or peerId changes)
   useEffect(() => {
-    if (peerId && chatClient) {
+    if (group_id && chatClient) {
       fetchSummaries();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [peerId, chatClient]);
+  }, [group_id, chatClient]);
 
   // Show banner when statusMessage changes and auto-dismiss after 5 seconds
   useEffect(() => {
@@ -272,7 +274,7 @@ export default function FPDescriptionTab({
         >
           <button
             onClick={generateSummary}
-            disabled={isLoading || !peerId}
+            disabled={isLoading || !group_id}
             style={{
               padding: "0.5rem 1rem",
               backgroundColor: isLoading ? "#9ca3af" : "#2563eb",
@@ -281,7 +283,7 @@ export default function FPDescriptionTab({
               borderRadius: "0.375rem",
               fontSize: "0.875rem",
               fontWeight: 500,
-              cursor: isLoading || !peerId ? "not-allowed" : "pointer",
+              cursor: isLoading || !group_id ? "not-allowed" : "pointer",
               display: "flex",
               alignItems: "center",
               gap: "0.5rem",

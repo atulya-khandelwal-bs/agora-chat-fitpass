@@ -499,26 +499,22 @@ export default function FPMessageBubble({
           onClick={handleClick}
           onTouchEnd={handleTouchEnd}
         >
-          <div className="message-time-edit-column">
-            {isEditableTextMessage && (
+          <div className="message-bubble-with-actions">
+            {isEditableTextMessage && msg.isIncoming && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
                   onEdit?.(msg.id, getContentString());
-                  // Hide button after clicking
                   setShowEditButton(false);
                 }}
                 onTouchStart={(e) => {
-                  // Prevent the message bubble's touch handler from firing when touching the button
                   e.stopPropagation();
                 }}
                 onTouchEnd={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
-                  // Trigger edit when button is tapped
                   onEdit?.(msg.id, getContentString());
-                  // Hide button after clicking
                   setShowEditButton(false);
                 }}
                 className="message-edit-button-inline"
@@ -532,34 +528,62 @@ export default function FPMessageBubble({
                 <Edit2 size={14} color="#666" />
               </button>
             )}
-            <div className="message-time mb-1">
-              {msg.timestamp}
-              {msg.isEdited && (
-                <span
-                  style={{ marginLeft: "4px", fontSize: "0.75em", opacity: 0.7 }}
-                >
-                  (edited)
-                </span>
-              )}
+            <div
+              className="message-bubble"
+              ref={messageBubbleRef}
+              style={{
+                position: "relative",
+                cursor:
+                  isEditableTextMessage && isTouchDeviceRef.current
+                    ? "pointer"
+                    : "default",
+              }}
+            >
+              <div className="message-sender-name">
+                {msg.isIncoming
+                  ? selectedContact?.name || msg.sender
+                  : msg.sender || userId}
+              </div>
+              {renderMessageContent()}
             </div>
+            {isEditableTextMessage && !msg.isIncoming && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  onEdit?.(msg.id, getContentString());
+                  setShowEditButton(false);
+                }}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                }}
+                onTouchEnd={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  onEdit?.(msg.id, getContentString());
+                  setShowEditButton(false);
+                }}
+                className="message-edit-button-inline"
+                title="Edit message"
+                style={{
+                  display: showEditButton ? "inline-flex" : "none",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Edit2 size={14} color="#666" />
+              </button>
+            )}
           </div>
-          <div
-            className="message-bubble"
-            ref={messageBubbleRef}
-            style={{
-              position: "relative",
-              cursor:
-                isEditableTextMessage && isTouchDeviceRef.current
-                  ? "pointer"
-                  : "default",
-            }}
-          >
-            <div className="message-sender-name">
-              {msg.isIncoming
-                ? selectedContact?.name || msg.sender
-                : msg.sender || userId}
-            </div>
-            {renderMessageContent()}
+          <div className="message-time">
+            {msg.timestamp}
+            {msg.isEdited && (
+              <span
+                style={{ marginLeft: "4px", fontSize: "0.75em", opacity: 0.7 }}
+              >
+                (edited)
+              </span>
+            )}
           </div>
         </div>
       </div>

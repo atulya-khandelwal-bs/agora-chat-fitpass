@@ -1,22 +1,23 @@
-import React from "react";
+import React, { forwardRef } from "react";
+
 interface FPMediaPopupProps {
   showMediaPopup: boolean;
   onSelect: (type: "photos" | "camera" | "file") => void;
   onClose: () => void;
 }
 
-export default function FPMediaPopup({
-  showMediaPopup,
-  onSelect,
-  onClose: _onClose,
-}: FPMediaPopupProps): React.JSX.Element | null {
-  if (!showMediaPopup) return null;
+const FPMediaPopup = forwardRef<HTMLDivElement, FPMediaPopupProps>(
+  function FPMediaPopup(
+    { showMediaPopup, onSelect, onClose: _onClose },
+    ref
+  ): React.JSX.Element | null {
+    if (!showMediaPopup) return null;
 
-  return (
-    <div className="media-popup">
-      <div className="media-options">
-        <button className="media-option" onClick={() => onSelect("photos")}>
-          <div className="media-icon photos-icon">
+    return (
+      <div ref={ref} className="media-popup">
+        <div className="media-options">
+          <button className="media-option" onClick={() => onSelect("photos")}>
+            <div className="media-icon photos-icon">
             <svg
               width="32"
               height="32"
@@ -77,5 +78,8 @@ export default function FPMediaPopup({
         </button>
       </div>
     </div>
-  );
-}
+    );
+  }
+);
+
+export default FPMediaPopup;
